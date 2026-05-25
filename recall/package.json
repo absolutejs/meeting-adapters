@@ -33,7 +33,7 @@
 		"@absolutejs/voice": ">=0.0.22-beta.550"
 	},
 	"devDependencies": {
-		"@absolutejs/meeting": "link:@absolutejs/meeting",
+		"@absolutejs/meeting": "0.0.1-beta.0",
 		"@absolutejs/voice": "0.0.22-beta.550",
 		"@types/bun": "1.3.9",
 		"typescript": "^5.9.3"
