@@ -8,7 +8,7 @@ when available, the participant roster) into the meeting core, which runs the
 
 ```
 meeting-adapters/
-  recall/    -> @absolutejs/meeting-recall    (Recall.ai: Meet / Zoom / Teams)   [planned, needs RECALL_API_KEY]
+  recall/    -> @absolutejs/meeting-recall    (Recall.ai: Meet / Zoom / Teams)   [built, needs RECALL_API_KEY]
   discord/   -> @absolutejs/meeting-discord    (@discordjs/voice receive)          [planned, needs a bot token]
 ```
 
@@ -28,7 +28,10 @@ implementation.
 
 ## Status
 
-- **recall** — first target (Meet/Zoom/Teams in one integration). Awaiting a
-  Recall.ai API key to implement + test the real-time audio stream.
+- **recall** — built. One integration covers Google Meet / Zoom / Teams. Recall
+  joins as a bot and streams per-participant raw PCM (mono 16-bit LE @ 16 kHz)
+  to a websocket you host; the adapter decodes it into diarized `audio` +
+  `participant` events. Verified live against a Recall workspace (bot create /
+  list / join lifecycle). See [`recall/README.md`](./recall/README.md).
 - **discord** — after recall. Native `@discordjs/voice` receive (per-user Opus
   → PCM), so speakers are known without diarization.
