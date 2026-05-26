@@ -12,7 +12,21 @@ import {
   type VoiceConnection,
   VoiceConnectionStatus,
 } from "@discordjs/voice";
-import prism from "prism-media";
+// Import prism's Opus decoder via its subpath, NOT the package index. The index
+// pulls in prism's FFmpeg module, which does a literal `require('ffmpeg-static')`
+// — an optional dep we never use that breaks bundlers / `bun --compile`. The opus
+// subpath needs no ffmpeg. (The subpath is declared `any` in prism-opus.d.ts.)
+import prismOpus from "prism-media/src/opus/Opus";
+
+const OpusDecoder = (
+  prismOpus as unknown as {
+    Decoder: new (options: {
+      channels: number;
+      frameSize: number;
+      rate: number;
+    }) => NodeJS.ReadWriteStream;
+  }
+).Decoder;
 
 /**
  * Discord delivers per-user Opus at 48 kHz stereo; we decode + downmix to mono
@@ -108,7 +122,7 @@ export const createDiscordMeetingSource = (
     const opus = connection.receiver.subscribe(userId, {
       end: { behavior: EndBehaviorType.AfterSilence, duration: 1000 },
     });
-    const decoder = new prism.opus.Decoder({
+    const decoder = new OpusDecoder({
       channels: 2,
       frameSize: 960,
       rate: 48000,
