@@ -8,8 +8,8 @@ when available, the participant roster) into the meeting core, which runs the
 
 ```
 meeting-adapters/
-  recall/    -> @absolutejs/meeting-recall    (Recall.ai: Meet / Zoom / Teams)   [built, needs RECALL_API_KEY]
-  discord/   -> @absolutejs/meeting-discord    (@discordjs/voice receive)          [planned, needs a bot token]
+  recall/    -> @absolutejs/meeting-recall    (Recall.ai: Meet / Zoom / Teams)   [published, needs RECALL_API_KEY]
+  discord/   -> @absolutejs/meeting-discord    (@discordjs/voice receive)          [published, needs a bot token]
 ```
 
 A `MeetingSource` is intentionally small:
@@ -33,5 +33,7 @@ implementation.
   to a websocket you host; the adapter decodes it into diarized `audio` +
   `participant` events. Verified live against a Recall workspace (bot create /
   list / join lifecycle). See [`recall/README.md`](./recall/README.md).
-- **discord** — after recall. Native `@discordjs/voice` receive (per-user Opus
-  → PCM), so speakers are known without diarization.
+- **discord** — built + published. Native `@discordjs/voice` receive (per-user
+  Opus → mono PCM), so speakers are known without diarization. The bot joins a
+  voice channel and streams each participant in. See
+  [`discord/README.md`](./discord/README.md).
