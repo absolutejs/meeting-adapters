@@ -1,6 +1,6 @@
 {
 	"name": "@absolutejs/meeting-recall",
-	"version": "0.0.1-beta.0",
+	"version": "0.0.1-beta.1",
 	"description": "Recall.ai source adapter for @absolutejs/meeting — Recall joins a Google Meet / Zoom / Teams call as a bot and streams per-participant audio into the meeting core for live transcription + analysis",
 	"repository": {
 		"type": "git",
@@ -33,7 +33,7 @@
 		"@absolutejs/voice": ">=0.0.22-beta.550"
 	},
 	"devDependencies": {
-		"@absolutejs/meeting": "0.0.1-beta.0",
+		"@absolutejs/meeting": "0.0.1-beta.1",
 		"@absolutejs/voice": "0.0.22-beta.550",
 		"@types/bun": "1.3.9",
 		"typescript": "^5.9.3"

@@ -1,14 +1,20 @@
+import { Readable } from "node:stream";
 import type { AudioFormat } from "@absolutejs/voice";
 import type {
   MeetingParticipant,
   MeetingSource,
   MeetingSourceEventMap,
+  SpeakAudio,
 } from "@absolutejs/meeting";
 import { Client, GatewayIntentBits } from "discord.js";
 import {
+  AudioPlayerStatus,
+  createAudioPlayer,
+  createAudioResource,
   EndBehaviorType,
   entersState,
   joinVoiceChannel,
+  StreamType,
   type VoiceConnection,
   VoiceConnectionStatus,
 } from "@discordjs/voice";
@@ -66,6 +72,24 @@ export const stereoToMono = (stereo: Buffer): Uint8Array => {
 
   return new Uint8Array(mono.buffer, mono.byteOffset, mono.byteLength);
 };
+
+/** Upmix mono 16-bit LE PCM to stereo by duplicating each sample (L=R=s). */
+export const monoToStereo = (mono: Buffer): Buffer => {
+  const frames = Math.floor(mono.length / 2);
+  const stereo = Buffer.allocUnsafe(frames * 4);
+  for (let i = 0; i < frames; i += 1) {
+    const sample = mono.readInt16LE(i * 2);
+    stereo.writeInt16LE(sample, i * 4);
+    stereo.writeInt16LE(sample, i * 4 + 2);
+  }
+
+  return stereo;
+};
+
+const toBuffer = (data: ArrayBuffer | Uint8Array): Buffer =>
+  data instanceof ArrayBuffer
+    ? Buffer.from(data)
+    : Buffer.from(data.buffer, data.byteOffset, data.byteLength);
 
 /**
  * A `MeetingSource` backed by a Discord voice channel. The bot joins the
@@ -183,6 +207,58 @@ export const createDiscordMeetingSource = (
       connection.on(VoiceConnectionStatus.Disconnected, () =>
         emit("end", { reason: "disconnected" }),
       );
+    },
+    speak: async (audio: SpeakAudio) => {
+      if (!connection) {
+        throw new Error("discord speak: not connected to a voice channel");
+      }
+      if (audio.format !== "pcm") {
+        throw new Error(
+          `discord speak: unsupported format "${audio.format}" — supply 48 kHz s16le PCM`,
+        );
+      }
+      if (audio.sampleRateHz !== 48000) {
+        throw new Error(
+          `discord speak: sample rate must be 48000 Hz (got ${audio.sampleRateHz})`,
+        );
+      }
+      const pcm = toBuffer(audio.data);
+      const stereo =
+        audio.channels === 2
+          ? pcm
+          : audio.channels === 1
+            ? monoToStereo(pcm)
+            : (() => {
+                throw new Error(
+                  `discord speak: only 1 or 2 channels supported (got ${audio.channels})`,
+                );
+              })();
+
+      // StreamType.Raw expects 48 kHz stereo s16le — Discord opus-encodes
+      // internally. Subscribe a fresh player so concurrent speak() calls don't
+      // chop each other off mid-utterance (one player == one playback queue).
+      const resource = createAudioResource(Readable.from(stereo), {
+        inputType: StreamType.Raw,
+      });
+      const player = createAudioPlayer();
+      const subscription = connection.subscribe(player);
+      player.play(resource);
+
+      try {
+        await new Promise<void>((resolve, reject) => {
+          player.once(AudioPlayerStatus.Idle, () => resolve());
+          player.once("error", (error) =>
+            reject(error instanceof Error ? error : new Error(String(error))),
+          );
+        });
+      } finally {
+        try {
+          player.stop(true);
+        } catch {
+          // already idle
+        }
+        subscription?.unsubscribe();
+      }
     },
     stop: async (reason) => {
       try {

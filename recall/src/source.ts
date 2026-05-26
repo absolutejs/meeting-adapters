@@ -3,13 +3,36 @@ import type {
   MeetingParticipant,
   MeetingSource,
   MeetingSourceEventMap,
+  SpeakAudio,
 } from "@absolutejs/meeting";
 import {
   createRecallClient,
+  type RecallAutomaticAudioOutput,
   type RecallClient,
   type RecallClientOptions,
   type RecallRecordingConfig,
 } from "./client";
+
+/**
+ * 200 ms of silence as mp3 (~489 bytes, 652 b64 chars). Recall requires
+ * `automatic_audio_output` at create time to enable the `output_audio`
+ * endpoint, so when a caller just wants speak() (no greeting jingle), we hand
+ * Recall this near-inaudible placeholder.
+ */
+const SILENT_MP3_B64 =
+  "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//NwwAAAAAAAAAAAAEluZm8AAAAPAAAACgAAAbwAd3d3d3d3d3d3h4eHh4eHh4eHh5aWlpaWlpaWlpalpaWlpaWlpaWltLS0tLS0tLS0tMPDw8PDw8PDw8PS0tLS0tLS0tLS4eHh4eHh4eHh4fDw8PDw8PDw8PD/////////////AAAAAExhdmM2MC4zMQAAAAAAAAAAAAAAACQDBgAAAAAAAAG87PIqcgAAAAAAAAAAAAAAAAD/8xDEAAAAA0gAAAAATEFNRTMuMTAwVVVVVf/zEsQNAAADSAAAAABVVVVVVVVVVVVVVVVVVf/zEMQbAAADSAAAAABVVVVVVVVVVVVVVVVV//MQxCgAAANIAAAAAFVVVVVVVVVVVVVVVVX/8xDENQAAA0gAAAAAVVVVVVVVVVVVVVVVVf/zEMRCAAADSAAAAABVVVVVVVVVVVVVVVVV//MQxE8AAANIAAAAAFVVVVVVVVVVVVVVVVX/8xDEXAAAA0gAAAAAVVVVVVVVVVVVVVVVVf/zEMRpAAADSAAAAABVVVVVVVVVVVVVVVVV//MSxHYAAANIAAAAAFVVVVVVVVVVVVVVVVVV";
+
+const encodeBase64 = (bytes: Uint8Array): string => {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(bytes).toString("base64");
+  }
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i] ?? 0);
+  }
+
+  return btoa(binary);
+};
 
 /** Recall's `audio_separate_raw` stream is mono 16-bit little-endian PCM @ 16 kHz. */
 export const RECALL_AUDIO_FORMAT: AudioFormat = {
@@ -33,6 +56,13 @@ export type RecallMeetingSourceOptions = {
   botName?: string;
   /** Extra recording_config merged onto the realtime audio config. */
   recordingConfig?: RecallRecordingConfig;
+  /**
+   * Arm the bot for `speak()` (Recall calls this `automatic_audio_output` —
+   * a one-time create-time toggle that lights up the `output_audio` endpoint).
+   * Pass `true` for a near-inaudible silent placeholder, or your own initial
+   * audio. Default: `false` (listen-only bot, `speak()` will reject).
+   */
+  enableSpeak?: boolean | RecallAutomaticAudioOutput;
 } & Partial<RecallClientOptions>;
 
 export type RecallMeetingSource = MeetingSource & {
@@ -190,6 +220,26 @@ export const createRecallMeetingSource = (
         listeners[event].delete(handler as never);
       };
     },
+    speak: async (audio: SpeakAudio) => {
+      if (!botId) {
+        throw new Error("recall speak: bot has not joined yet (call start() first)");
+      }
+      if (audio.format !== "mp3") {
+        throw new Error(
+          `recall speak: unsupported format "${audio.format}" — supply mp3`,
+        );
+      }
+      if (!options.enableSpeak) {
+        throw new Error(
+          "recall speak: bot was not created with enableSpeak — Recall requires automatic_audio_output at create time to enable output_audio",
+        );
+      }
+      const bytes =
+        audio.data instanceof ArrayBuffer
+          ? new Uint8Array(audio.data)
+          : audio.data;
+      await client.outputAudioMp3(botId, encodeBase64(bytes));
+    },
     start: async () => {
       stopped = false;
       const recordingConfig: RecallRecordingConfig = {
@@ -204,10 +254,23 @@ export const createRecallMeetingSource = (
           ...(options.recordingConfig?.realtime_endpoints ?? []),
         ],
       };
+      const automaticAudioOutput: RecallAutomaticAudioOutput | undefined =
+        options.enableSpeak === true
+          ? {
+              in_call_recording: {
+                data: { b64_data: SILENT_MP3_B64, kind: "mp3" },
+              },
+            }
+          : options.enableSpeak === false || options.enableSpeak === undefined
+            ? undefined
+            : options.enableSpeak;
       const bot = await client.createBot({
         bot_name: options.botName ?? "Deal Referee",
         meeting_url: options.meetingUrl,
         recording_config: recordingConfig,
+        ...(automaticAudioOutput
+          ? { automatic_audio_output: automaticAudioOutput }
+          : {}),
       });
       botId = bot.id;
     },

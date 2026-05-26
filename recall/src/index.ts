@@ -1,6 +1,7 @@
 export {
   createRecallClient,
   RecallApiError,
+  type RecallAutomaticAudioOutput,
   type RecallBot,
   type RecallClient,
   type RecallClientOptions,

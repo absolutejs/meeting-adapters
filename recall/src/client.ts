@@ -46,12 +46,26 @@ export type RecallRecordingConfig = {
   [key: string]: unknown;
 };
 
+/**
+ * Initial audio Recall plays automatically when the bot joins. Enabling
+ * `automatic_audio_output` (i.e. passing this on create) is what lights up the
+ * `output_audio` endpoint for that bot — you cannot speak through a bot that
+ * was created without it.
+ */
+export type RecallAutomaticAudioOutput = {
+  in_call_recording: {
+    data: { kind: "mp3"; b64_data: string };
+  };
+};
+
 export type RecallCreateBotInput = {
   /** Meeting URL the bot joins (Google Meet / Zoom / Teams). */
   meeting_url: string;
   /** Display name shown for the bot in the call. */
   bot_name?: string;
   recording_config?: RecallRecordingConfig;
+  /** Audio Recall plays on join — also the toggle that enables output_audio. */
+  automatic_audio_output?: RecallAutomaticAudioOutput;
   [key: string]: unknown;
 };
 
@@ -93,6 +107,12 @@ export type RecallClient = {
   leaveBot: (botId: string) => Promise<RecallBot>;
   /** Delete the bot record entirely. */
   deleteBot: (botId: string) => Promise<void>;
+  /**
+   * Play an MP3 (base64) through the bot into the call. Requires the bot to
+   * have been created with `automatic_audio_output`; otherwise Recall returns
+   * a 400/403.
+   */
+  outputAudioMp3: (botId: string, mp3Base64: string) => Promise<void>;
 };
 
 export const createRecallClient = (
@@ -154,6 +174,12 @@ export const createRecallClient = (
         : "";
 
       return request(`/bot/${qs}`).then((res) => res.json());
+    },
+    outputAudioMp3: async (botId, mp3Base64) => {
+      await request(`/bot/${botId}/output_audio/`, {
+        body: JSON.stringify({ kind: "mp3", b64_data: mp3Base64 }),
+        method: "POST",
+      });
     },
   };
 };
