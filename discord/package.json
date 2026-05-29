@@ -1,6 +1,6 @@
 {
 	"name": "@absolutejs/meeting-discord",
-	"version": "0.0.1-beta.10",
+	"version": "0.0.1-beta.11",
 	"description": "Discord voice source adapter for @absolutejs/meeting — a bot joins a Discord voice channel and streams per-participant audio (speakers known, no diarization needed) into the meeting core for live transcription + analysis",
 	"repository": {
 		"type": "git",

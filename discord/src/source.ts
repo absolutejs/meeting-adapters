@@ -126,7 +126,7 @@ const opusSilenceFilter = (): Transform =>
  */
 export const createDiscordMeetingSource = (
   options: DiscordMeetingSourceOptions,
-): MeetingSource => {
+): MeetingSource & { setLeaveWhenAloneMs: (ms: number) => void } => {
   const listeners: {
     [K in keyof MeetingSourceEventMap]: Set<
       (payload: MeetingSourceEventMap[K]) => void | Promise<void>
@@ -151,7 +151,13 @@ export const createDiscordMeetingSource = (
   let ended = false;
   let emptyTimer: ReturnType<typeof setTimeout> | null = null;
   let voiceStateHandler: (() => void) | null = null;
-  const leaveWhenAloneMs = options.leaveWhenAloneMs ?? 30000;
+  let wasEmpty = false;
+  // Base grace before leaving an empty channel (default 5 min). `aloneWindowMs`
+  // is the *active* grace — the agent can extend it via setLeaveWhenAloneMs when
+  // a participant announces a known absence ("back in 10"), and it resets to the
+  // base whenever someone actually returns.
+  const baseAloneWindowMs = options.leaveWhenAloneMs ?? 300000;
+  let aloneWindowMs = baseAloneWindowMs;
 
   // `end` can be reached several ways (empty channel, disconnect, explicit
   // stop, and the meeting core calling stop() in response to our own end) —
@@ -170,23 +176,39 @@ export const createDiscordMeetingSource = (
     return channel.members.filter((m) => !m.user.bot).size;
   };
 
-  // When the last human leaves, start a grace timer; if still empty when it
-  // fires, leave. Any human (re)joining cancels a pending leave.
+  // When the last human leaves, start a grace timer sized to the active window;
+  // if still empty when it fires, leave. A genuine return (empty → occupied)
+  // cancels the timer and resets the window to the base default.
   const reconcileOccupancy = () => {
-    if (leaveWhenAloneMs <= 0 || ended) return;
+    if (ended) return;
     if (humansInChannel() > 0) {
       if (emptyTimer) {
         clearTimeout(emptyTimer);
         emptyTimer = null;
       }
+      if (wasEmpty) aloneWindowMs = baseAloneWindowMs;
+      wasEmpty = false;
 
       return;
     }
-    if (emptyTimer) return;
+    wasEmpty = true;
+    if (aloneWindowMs <= 0 || emptyTimer) return;
     emptyTimer = setTimeout(() => {
       emptyTimer = null;
       if (humansInChannel() === 0) emitEndOnce("empty-channel");
-    }, leaveWhenAloneMs);
+    }, aloneWindowMs);
+  };
+
+  // Let a caller (the referee agent) extend/shorten how long the bot waits alone
+  // — e.g. on hearing "give me 10 minutes". Restarts a pending timer with the
+  // new window so the change takes effect even if the channel is already empty.
+  const setLeaveWhenAloneMs = (ms: number) => {
+    aloneWindowMs = Math.max(0, ms);
+    if (emptyTimer) {
+      clearTimeout(emptyTimer);
+      emptyTimer = null;
+      reconcileOccupancy();
+    }
   };
 
   const announce = async (userId: string) => {
@@ -237,6 +259,7 @@ export const createDiscordMeetingSource = (
         listeners[event].delete(handler as never);
       };
     },
+    setLeaveWhenAloneMs,
     start: async () => {
       if (!options.client && !options.token) {
         throw new Error("token or client is required");
@@ -305,11 +328,9 @@ export const createDiscordMeetingSource = (
       // Auto-leave when the channel empties out (e.g. everyone hangs up but the
       // bot keeps sitting there). Recompute occupancy on every voice-state
       // change in the guild, and once now in case it's already just the bot.
-      if (leaveWhenAloneMs > 0) {
-        voiceStateHandler = () => reconcileOccupancy();
-        client.on("voiceStateUpdate", voiceStateHandler);
-        reconcileOccupancy();
-      }
+      voiceStateHandler = () => reconcileOccupancy();
+      client.on("voiceStateUpdate", voiceStateHandler);
+      reconcileOccupancy();
     },
     speak: async (audio: SpeakAudio) => {
       if (!connection) {
