@@ -1,4 +1,4 @@
-import { Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import type { AudioFormat } from "@absolutejs/voice";
 import type {
   MeetingParticipant,
@@ -58,6 +58,9 @@ export type DiscordMeetingSourceOptions = {
   client?: Client;
   /** Ready-state timeout (ms) when joining the channel. Default 30000. */
   readyTimeoutMs?: number;
+  /** Leave (emit `end`) when no human remains in the channel for this long.
+   *  Default 30000. Set to 0 to disable and stay until explicitly stopped. */
+  leaveWhenAloneMs?: number;
 };
 
 /** Downmix interleaved 16-bit LE stereo PCM to mono (average L+R). */
@@ -91,6 +94,30 @@ const toBuffer = (data: ArrayBuffer | Uint8Array): Buffer =>
     ? Buffer.from(data)
     : Buffer.from(data.buffer, data.byteOffset, data.byteLength);
 
+// Discord emits a 3-byte Opus "silence frame" (0xF8 0xFF 0xFE) at the start/end
+// of speech bursts. Feeding silence/degenerate frames to the opusscript WASM
+// decoder can trip a fatal internal CELT assertion (opus_decoder.c:492,
+// CELT_SET_END_BAND) that calls emscripten abort() — which poisons the WASM
+// instance for the WHOLE process, so every subsequent decode (all users, all
+// calls) fails and the bot captures no audio. Dropping these frames before the
+// decoder avoids the abort. End-of-speech detection is handled by the receiver's
+// EndBehavior upstream, so dropping silence here doesn't affect it.
+const isOpusSilenceFrame = (buf: Buffer): boolean =>
+  buf.length <= 3 && buf[0] === 0xf8 && buf[1] === 0xff && buf[2] === 0xfe;
+
+const opusSilenceFilter = (): Transform =>
+  new Transform({
+    transform(chunk, _encoding, callback) {
+      const buf = chunk as Buffer;
+      if (buf.length === 0 || isOpusSilenceFrame(buf)) {
+        callback();
+
+        return;
+      }
+      callback(null, buf);
+    },
+  });
+
 /**
  * A `MeetingSource` backed by a Discord voice channel. The bot joins the
  * channel and, for each speaking user, decodes their Opus stream to mono PCM and
@@ -121,6 +148,46 @@ export const createDiscordMeetingSource = (
   let client: Client | null = null;
   let connection: VoiceConnection | null = null;
   let ownsClient = false;
+  let ended = false;
+  let emptyTimer: ReturnType<typeof setTimeout> | null = null;
+  let voiceStateHandler: (() => void) | null = null;
+  const leaveWhenAloneMs = options.leaveWhenAloneMs ?? 30000;
+
+  // `end` can be reached several ways (empty channel, disconnect, explicit
+  // stop, and the meeting core calling stop() in response to our own end) —
+  // emit it at most once so the meeting finalizes a single time.
+  const emitEndOnce = (reason: string) => {
+    if (ended) return;
+    ended = true;
+    emit("end", { reason });
+  };
+
+  // Count non-bot members currently in the target voice channel.
+  const humansInChannel = (): number => {
+    const channel = client?.channels.cache.get(options.channelId);
+    if (!channel || !channel.isVoiceBased()) return 0;
+
+    return channel.members.filter((m) => !m.user.bot).size;
+  };
+
+  // When the last human leaves, start a grace timer; if still empty when it
+  // fires, leave. Any human (re)joining cancels a pending leave.
+  const reconcileOccupancy = () => {
+    if (leaveWhenAloneMs <= 0 || ended) return;
+    if (humansInChannel() > 0) {
+      if (emptyTimer) {
+        clearTimeout(emptyTimer);
+        emptyTimer = null;
+      }
+
+      return;
+    }
+    if (emptyTimer) return;
+    emptyTimer = setTimeout(() => {
+      emptyTimer = null;
+      if (humansInChannel() === 0) emitEndOnce("empty-channel");
+    }, leaveWhenAloneMs);
+  };
 
   const announce = async (userId: string) => {
     if (seen.has(userId)) return;
@@ -151,12 +218,14 @@ export const createDiscordMeetingSource = (
       frameSize: 960,
       rate: 48000,
     });
+    const filter = opusSilenceFilter();
     opus.on("error", (error: Error) => emit("error", { error }));
+    filter.on("error", (error: Error) => emit("error", { error }));
     decoder.on("error", (error: Error) => emit("error", { error }));
     decoder.on("data", (pcm: Buffer) =>
       emit("audio", { chunk: stereoToMono(pcm), participant: userId }),
     );
-    opus.pipe(decoder);
+    opus.pipe(filter).pipe(decoder);
   };
 
   return {
@@ -193,10 +262,35 @@ export const createDiscordMeetingSource = (
       connection = joinVoiceChannel({
         adapterCreator: channel.guild.voiceAdapterCreator,
         channelId: options.channelId,
+        debug: true,
         guildId: options.guildId,
         selfDeaf: false, // must hear to receive
         selfMute: true, // the referee only listens
       });
+      // Diagnostic plumbing — voice handshakes are the most common failure
+      // mode (close-code 4017 'DAVE required', UDP egress blocks, etc.) and
+      // without these you only see the eventual entersState(Ready) timeout
+      // with no clue where it stalled. Logged at info; cheap enough to leave
+      // on in prod, and the only way to debug a compile-mode regression that
+      // doesn't repro in dev.
+      connection.on("stateChange", (oldS, newS) => {
+        console.info(
+          "[meeting-discord] state " + oldS?.status + " -> " + newS?.status +
+            ((newS as { closeCode?: number }).closeCode !== undefined
+              ? " closeCode=" + (newS as { closeCode?: number }).closeCode
+              : "") +
+            ((newS as { reason?: unknown }).reason !== undefined
+              ? " reason=" + JSON.stringify((newS as { reason?: unknown }).reason)
+              : ""),
+        );
+      });
+      connection.on("error", (error) =>
+        console.error(
+          "[meeting-discord] connection error: " +
+            (error instanceof Error ? error.message : String(error)),
+        ),
+      );
+      connection.on("debug", (m) => console.info("[meeting-discord] " + m));
       await entersState(
         connection,
         VoiceConnectionStatus.Ready,
@@ -205,8 +299,17 @@ export const createDiscordMeetingSource = (
 
       connection.receiver.speaking.on("start", onSpeakingStart);
       connection.on(VoiceConnectionStatus.Disconnected, () =>
-        emit("end", { reason: "disconnected" }),
+        emitEndOnce("disconnected"),
       );
+
+      // Auto-leave when the channel empties out (e.g. everyone hangs up but the
+      // bot keeps sitting there). Recompute occupancy on every voice-state
+      // change in the guild, and once now in case it's already just the bot.
+      if (leaveWhenAloneMs > 0) {
+        voiceStateHandler = () => reconcileOccupancy();
+        client.on("voiceStateUpdate", voiceStateHandler);
+        reconcileOccupancy();
+      }
     },
     speak: async (audio: SpeakAudio) => {
       if (!connection) {
@@ -261,6 +364,14 @@ export const createDiscordMeetingSource = (
       }
     },
     stop: async (reason) => {
+      if (emptyTimer) {
+        clearTimeout(emptyTimer);
+        emptyTimer = null;
+      }
+      if (client && voiceStateHandler) {
+        client.off("voiceStateUpdate", voiceStateHandler);
+        voiceStateHandler = null;
+      }
       try {
         connection?.destroy();
       } catch {
@@ -274,7 +385,7 @@ export const createDiscordMeetingSource = (
           // ignore
         }
       }
-      emit("end", { reason: reason ?? "stopped" });
+      emitEndOnce(reason ?? "stopped");
     },
   };
 };
