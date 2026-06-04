@@ -240,6 +240,14 @@ export const createRecallMeetingSource = (
           : audio.data;
       await client.outputAudioMp3(botId, encodeBase64(bytes));
     },
+    stopSpeaking: async () => {
+      // Barge-in: cut the bot's in-progress audio so it doesn't talk over a
+      // participant who started speaking. No-op before the bot has joined.
+      if (!botId) {
+        return;
+      }
+      await client.stopOutputAudio(botId);
+    },
     start: async () => {
       stopped = false;
       const recordingConfig: RecallRecordingConfig = {

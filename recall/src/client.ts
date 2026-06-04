@@ -113,6 +113,12 @@ export type RecallClient = {
    * a 400/403.
    */
   outputAudioMp3: (botId: string, mp3Base64: string) => Promise<void>;
+  /**
+   * Stop any in-progress output audio immediately — for barge-in / ducking when
+   * a participant starts talking while the bot is speaking. Idempotent: a no-op
+   * if nothing is playing.
+   */
+  stopOutputAudio: (botId: string) => Promise<void>;
 };
 
 export const createRecallClient = (
@@ -180,6 +186,9 @@ export const createRecallClient = (
         body: JSON.stringify({ kind: "mp3", b64_data: mp3Base64 }),
         method: "POST",
       });
+    },
+    stopOutputAudio: async (botId) => {
+      await request(`/bot/${botId}/output_audio/`, { method: "DELETE" });
     },
   };
 };
