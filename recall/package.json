@@ -7,6 +7,10 @@
 		"url": "https://github.com/absolutejs/meeting-adapters.git",
 		"directory": "recall"
 	},
+	"homepage": "https://github.com/absolutejs/meeting-adapters/tree/main/recall",
+	"bugs": {
+		"url": "https://github.com/absolutejs/meeting-adapters/issues"
+	},
 	"files": [
 		"dist",
 		"README.md"
