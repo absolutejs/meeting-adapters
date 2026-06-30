@@ -7,10 +7,7 @@
  */
 
 export type RecallRegion =
-  | "us-west-2"
-  | "us-east-1"
-  | "eu-central-1"
-  | "ap-northeast-1";
+  "us-west-2" | "us-east-1" | "eu-central-1" | "ap-northeast-1";
 
 const REGION_BASE_URL: Record<RecallRegion, string> = {
   "ap-northeast-1": "https://ap-northeast-1.recall.ai/api/v1",
@@ -102,7 +99,9 @@ export type RecallClient = {
   getBot: (botId: string) => Promise<RecallBot>;
   listBots: (
     params?: Record<string, string | number>,
-  ) => Promise<{ results?: RecallBot[]; next?: string | null } & Record<string, unknown>>;
+  ) => Promise<
+    { results?: RecallBot[]; next?: string | null } & Record<string, unknown>
+  >;
   /** Make the bot leave the call (keeps the bot record + recordings). */
   leaveBot: (botId: string) => Promise<RecallBot>;
   /** Delete the bot record entirely. */
@@ -119,6 +118,12 @@ export type RecallClient = {
    * if nothing is playing.
    */
   stopOutputAudio: (botId: string) => Promise<void>;
+  /**
+   * Post a text message into the call chat as the bot. Sends to everyone in the
+   * call. Requires the meeting platform to support bot chat (Recall surfaces a
+   * 4xx otherwise).
+   */
+  sendChatMessage: (botId: string, text: string) => Promise<void>;
 };
 
 export const createRecallClient = (
@@ -174,7 +179,10 @@ export const createRecallClient = (
       const qs = params
         ? `?${new URLSearchParams(
             Object.fromEntries(
-              Object.entries(params).map(([key, value]) => [key, String(value)]),
+              Object.entries(params).map(([key, value]) => [
+                key,
+                String(value),
+              ]),
             ),
           ).toString()}`
         : "";
@@ -189,6 +197,12 @@ export const createRecallClient = (
     },
     stopOutputAudio: async (botId) => {
       await request(`/bot/${botId}/output_audio/`, { method: "DELETE" });
+    },
+    sendChatMessage: async (botId, text) => {
+      await request(`/bot/${botId}/send_chat_message/`, {
+        body: JSON.stringify({ message: text, to: "everyone" }),
+        method: "POST",
+      });
     },
   };
 };

@@ -5,13 +5,13 @@
     "": {
       "name": "@absolutejs/meeting-recall",
       "devDependencies": {
-        "@absolutejs/meeting": "0.0.1-beta.4",
+        "@absolutejs/meeting": "0.0.1-beta.5",
         "@absolutejs/voice": "0.0.22-beta.550",
         "@types/bun": "1.3.9",
         "typescript": "^5.9.3",
       },
       "peerDependencies": {
-        "@absolutejs/meeting": ">=0.0.1-beta.0",
+        "@absolutejs/meeting": ">=0.0.1-beta.5",
         "@absolutejs/voice": ">=0.0.22-beta.550",
       },
     },
@@ -21,7 +21,7 @@
 
     "@absolutejs/media": ["@absolutejs/media@0.0.1-beta.19", "", {}, "sha512-H/sfJNmX8A/Tzuc/fHGyp6TnZmvGQtAx6IOKnV0EZ+xXa8Vofn3lwkAPmTLHyLgyS+y7ZCKMFuunQSgiJfAaFA=="],
 
-    "@absolutejs/meeting": ["@absolutejs/meeting@0.0.1-beta.4", "", { "dependencies": { "@absolutejs/voice": "0.0.22-beta.550" } }, "sha512-iENMRq6pSfQjK2uFrfxEHvErhs7/WmPX7A8lDZ5S2z8B1fMAA0nVcSUmG3YfUV8/PYiraVp+hjcnRIdGsI+VTw=="],
+    "@absolutejs/meeting": ["@absolutejs/meeting@0.0.1-beta.5", "", { "dependencies": { "@absolutejs/voice": "0.0.22-beta.550" } }, "sha512-MFDV84FniRSYyU+pHXk8MeBAUa6TTAmTqVR/q9MDWvveI3mvfte+lp6MssUYEPmkuLfJhu0LF/E3f2rggS1ddQ=="],
 
     "@absolutejs/native-darwin-arm64": ["@absolutejs/native-darwin-arm64@0.19.0-beta.1008", "", { "os": "darwin", "cpu": "arm64" }, "sha512-bztRSnYXrD2O5UL9IUTP/Bc2Pd36sxmEd8elxjBPkgcB4iW9RmGUhCBGOMvGTKuEzHjWaJVVa1na6L9q12AxdA=="],
 

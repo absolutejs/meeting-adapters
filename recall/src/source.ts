@@ -1,5 +1,7 @@
 import type { AudioFormat } from "@absolutejs/voice";
 import type {
+  ChatMessage,
+  MeetingCapabilities,
   MeetingParticipant,
   MeetingSource,
   MeetingSourceEventMap,
@@ -8,6 +10,7 @@ import type {
 import {
   createRecallClient,
   type RecallAutomaticAudioOutput,
+  type RecallBot,
   type RecallClient,
   type RecallClientOptions,
   type RecallRecordingConfig,
@@ -63,6 +66,26 @@ export type RecallMeetingSourceOptions = {
    * audio. Default: `false` (listen-only bot, `speak()` will reject).
    */
   enableSpeak?: boolean | RecallAutomaticAudioOutput;
+  /**
+   * Heartbeat + reconnect resilience for the realtime socket.
+   *
+   * Recall dials the realtime socket OUT to *your* server (`websocketUrl`), so
+   * the adapter can't re-dial it itself — true reconnection is consumer-driven
+   * (your ws server accepts Recall's next connection and keeps piping into the
+   * same `ingest`). What the adapter owns is telling a *transient drop* apart
+   * from a *real call end*: platforms (notably Google Meet) routinely drop the
+   * socket WITHOUT a clean end event, which would otherwise finalize a healthy
+   * call early. When you report a drop via `notifySocketClosed`, the adapter
+   * polls the Recall bot status (the heartbeat) with bounded backoff and only
+   * emits `end` once Recall confirms the bot actually left/ended. A resumed
+   * frame or `notifySocketOpen` cancels the check.
+   */
+  reconnect?: {
+    /** Max status polls after a drop before giving up and ending. Default 5. */
+    maxRetries?: number;
+    /** Base backoff between polls (ms); grows linearly per attempt. Default 2000. */
+    backoffMs?: number;
+  };
 } & Partial<RecallClientOptions>;
 
 export type RecallMeetingSource = MeetingSource & {
@@ -76,6 +99,19 @@ export type RecallMeetingSource = MeetingSource & {
   ingest: (
     raw: string | ArrayBuffer | ArrayBufferView | Record<string, unknown>,
   ) => void;
+  /**
+   * Tell the adapter your realtime ws just connected (your socket's `open`).
+   * Cancels any in-flight drop-verification so a successful reconnect doesn't
+   * get finalized.
+   */
+  notifySocketOpen: () => void;
+  /**
+   * Tell the adapter your realtime ws just dropped (your socket's `close`). The
+   * adapter begins heartbeat verification (polling bot status); it does NOT end
+   * the meeting for a transient drop — only once Recall confirms a real end, or
+   * after the bounded retries are exhausted. Pass the ws close `code` for traces.
+   */
+  notifySocketClosed: (code?: number) => void;
 };
 
 const decodeBase64 = (b64: string): Uint8Array => {
@@ -92,7 +128,8 @@ const decodeBase64 = (b64: string): Uint8Array => {
 const toMessage = (
   raw: string | ArrayBuffer | ArrayBufferView | Record<string, unknown>,
 ): Record<string, unknown> => {
-  if (typeof raw === "string") return JSON.parse(raw) as Record<string, unknown>;
+  if (typeof raw === "string")
+    return JSON.parse(raw) as Record<string, unknown>;
   if (raw instanceof ArrayBuffer) {
     return JSON.parse(new TextDecoder().decode(raw)) as Record<string, unknown>;
   }
@@ -130,6 +167,7 @@ export const createRecallMeetingSource = (
     >;
   } = {
     audio: new Set(),
+    chat: new Set(),
     end: new Set(),
     error: new Set(),
     participant: new Set(),
@@ -144,6 +182,97 @@ export const createRecallMeetingSource = (
   const seenParticipants = new Set<string>();
   let botId: string | null = null;
   let stopped = false;
+  let ended = false;
+  // Tracks whether the consumer's realtime socket is believed up. Frames arriving
+  // (or notifySocketOpen) flip it true; notifySocketClosed flips it false and
+  // arms heartbeat verification.
+  let socketAlive = false;
+  let verifyTimer: ReturnType<typeof setTimeout> | null = null;
+  let verifyAttempts = 0;
+
+  // `end` is reachable from several places (real end events, ws-drop heartbeat,
+  // explicit stop) — emit it at most once so the meeting finalizes a single time.
+  const emitEndOnce = (reason: string) => {
+    if (ended) return;
+    ended = true;
+    if (verifyTimer) {
+      clearTimeout(verifyTimer);
+      verifyTimer = null;
+    }
+    emit("end", { reason });
+  };
+
+  const toRoster = (
+    participant: Record<string, unknown>,
+  ): MeetingParticipant => ({
+    id: String(participant.id),
+    metadata: participant,
+    platform: "recall",
+    ...(typeof participant.name === "string" ? { name: participant.name } : {}),
+  });
+
+  // Recall bot status_changes whose last code signals the call is genuinely over
+  // (vs. a transient transport drop). Used by the heartbeat to decide whether a
+  // socket close should finalize the meeting.
+  const isEndedBot = (bot: RecallBot): boolean => {
+    const changes = bot.status_changes ?? [];
+    const last = changes[changes.length - 1];
+    const code = last?.code ?? "";
+
+    return /(done|fatal|call_ended|ended)/i.test(code);
+  };
+
+  const cancelVerify = () => {
+    if (verifyTimer) {
+      clearTimeout(verifyTimer);
+      verifyTimer = null;
+    }
+    verifyAttempts = 0;
+  };
+
+  // Heartbeat after a socket drop: poll the bot status with bounded linear
+  // backoff. Confirmed end → finalize; still in-call → keep waiting; retries
+  // exhausted → finalize as unrecovered. A resumed frame / reconnect cancels it.
+  const startDropVerify = (code?: number) => {
+    if (stopped || ended || verifyTimer) return;
+    const maxRetries = options.reconnect?.maxRetries ?? 5;
+    const backoffMs = options.reconnect?.backoffMs ?? 2000;
+    verifyAttempts = 0;
+    const tick = async () => {
+      verifyTimer = null;
+      if (stopped || ended || socketAlive) return;
+      verifyAttempts += 1;
+      try {
+        const bot = botId ? await client.getBot(botId) : null;
+        if (bot && isEndedBot(bot)) {
+          emitEndOnce(
+            `socket-closed:call-ended${typeof code === "number" ? `:${code}` : ""}`,
+          );
+
+          return;
+        }
+      } catch (error) {
+        emit("error", { error: error as Error });
+      }
+      if (stopped || ended || socketAlive) return;
+      if (verifyAttempts >= maxRetries) {
+        emitEndOnce(
+          `socket-closed-unrecovered${typeof code === "number" ? `:${code}` : ""}`,
+        );
+
+        return;
+      }
+      verifyTimer = setTimeout(() => void tick(), backoffMs * verifyAttempts);
+    };
+    verifyTimer = setTimeout(() => void tick(), backoffMs);
+  };
+
+  // Any traffic on the socket means it's alive — flip state and cancel a pending
+  // drop verification (a genuine reconnect/resume).
+  const markSocketAlive = () => {
+    socketAlive = true;
+    cancelVerify();
+  };
 
   const handleAudioFrame = (data: Record<string, unknown>) => {
     // Recall nests the payload as data.data.{buffer,timestamp} + data.participant.
@@ -160,15 +289,7 @@ export const createRecallMeetingSource = (
 
     if (participantId && !seenParticipants.has(participantId)) {
       seenParticipants.add(participantId);
-      const roster: MeetingParticipant = {
-        id: participantId,
-        metadata: participant,
-        platform: "recall",
-        ...(typeof participant.name === "string"
-          ? { name: participant.name }
-          : {}),
-      };
-      emit("participant", { participant: roster });
+      emit("participant", { participant: toRoster(participant) });
     }
 
     emit("audio", {
@@ -177,8 +298,57 @@ export const createRecallMeetingSource = (
     });
   };
 
+  // participant_events.chat_message → a `chat` event. Recall nests the message
+  // under data.data.{text,timestamp} with the sender in data.participant.
+  const handleChatMessage = (data: Record<string, unknown>) => {
+    const inner = asRecord(data.data);
+    const text =
+      typeof inner.text === "string"
+        ? inner.text
+        : typeof inner.message === "string"
+          ? inner.message
+          : undefined;
+    if (typeof text !== "string" || text.length === 0) return;
+
+    const participant = asRecord(data.participant ?? inner.participant);
+    const hasParticipant = participant.id !== undefined;
+    const timestamp =
+      typeof inner.timestamp === "number"
+        ? inner.timestamp
+        : typeof data.timestamp === "number"
+          ? data.timestamp
+          : undefined;
+
+    const message: ChatMessage = {
+      kind: "message",
+      text,
+      ...(hasParticipant
+        ? { author: toRoster(participant), authorId: String(participant.id) }
+        : {}),
+      ...(timestamp !== undefined ? { timestamp } : {}),
+    };
+    emit("chat", { message });
+  };
+
+  // participant_events.join / .leave → a `participant` event carrying status so
+  // the core can track the live roster (leave = someone hung up).
+  const handleParticipantEvent = (
+    data: Record<string, unknown>,
+    status: "joined" | "left",
+  ) => {
+    const inner = asRecord(data.data);
+    const participant = asRecord(data.participant ?? inner.participant);
+    if (participant.id === undefined) return;
+    if (status === "joined") {
+      const id = String(participant.id);
+      if (seenParticipants.has(id)) return;
+      seenParticipants.add(id);
+    }
+    emit("participant", { participant: toRoster(participant), status });
+  };
+
   const ingest: RecallMeetingSource["ingest"] = (raw) => {
-    if (stopped) return;
+    if (stopped || ended) return;
     let message: Record<string, unknown>;
     try {
       message = toMessage(raw);
@@ -187,6 +357,10 @@ export const createRecallMeetingSource = (
 
       return;
     }
+
+    // A parsed frame means the realtime socket is delivering — treat it as a
+    // heartbeat so any pending drop-verification is cancelled.
+    markSocketAlive();
 
     const event = typeof message.event === "string" ? message.event : "";
     const data = asRecord(message.data);
@@ -197,22 +371,53 @@ export const createRecallMeetingSource = (
       return;
     }
 
+    if (event === "participant_events.chat_message") {
+      handleChatMessage(data);
+
+      return;
+    }
+
+    if (event === "participant_events.join") {
+      handleParticipantEvent(data, "joined");
+
+      return;
+    }
+
+    if (event === "participant_events.leave") {
+      handleParticipantEvent(data, "left");
+
+      return;
+    }
+
     if (
       event.endsWith(".done") ||
       event.endsWith("call_ended") ||
       event === "bot.done" ||
       event === "bot.fatal"
     ) {
-      emit("end", { reason: event });
+      emitEndOnce(event);
     }
+  };
+
+  const capabilities: MeetingCapabilities = {
+    canChat: true,
+    canSpeak: Boolean(options.enableSpeak),
   };
 
   return {
     get botId() {
       return botId;
     },
+    capabilities,
     format: RECALL_AUDIO_FORMAT,
     ingest,
+    notifySocketClosed: (code) => {
+      socketAlive = false;
+      startDropVerify(code);
+    },
+    notifySocketOpen: () => {
+      markSocketAlive();
+    },
     on: (event, handler) => {
       listeners[event].add(handler as never);
 
@@ -222,7 +427,9 @@ export const createRecallMeetingSource = (
     },
     speak: async (audio: SpeakAudio) => {
       if (!botId) {
-        throw new Error("recall speak: bot has not joined yet (call start() first)");
+        throw new Error(
+          "recall speak: bot has not joined yet (call start() first)",
+        );
       }
       if (audio.format !== "mp3") {
         throw new Error(
@@ -240,6 +447,14 @@ export const createRecallMeetingSource = (
           : audio.data;
       await client.outputAudioMp3(botId, encodeBase64(bytes));
     },
+    sendChat: async (text) => {
+      if (!botId) {
+        throw new Error(
+          "recall sendChat: bot has not joined yet (call start() first)",
+        );
+      }
+      await client.sendChatMessage(botId, text);
+    },
     stopSpeaking: async () => {
       // Barge-in: cut the bot's in-progress audio so it doesn't talk over a
       // participant who started speaking. No-op before the bot has joined.
@@ -250,12 +465,18 @@ export const createRecallMeetingSource = (
     },
     start: async () => {
       stopped = false;
+      ended = false;
       const recordingConfig: RecallRecordingConfig = {
         audio_separate_raw: {},
         ...options.recordingConfig,
         realtime_endpoints: [
           {
-            events: ["audio_separate_raw.data"],
+            events: [
+              "audio_separate_raw.data",
+              "participant_events.join",
+              "participant_events.leave",
+              "participant_events.chat_message",
+            ],
             type: "websocket",
             url: options.websocketUrl,
           },
@@ -284,6 +505,7 @@ export const createRecallMeetingSource = (
     },
     stop: async (reason) => {
       stopped = true;
+      cancelVerify();
       if (botId) {
         try {
           await client.leaveBot(botId);
@@ -291,7 +513,7 @@ export const createRecallMeetingSource = (
           emit("error", { error: error as Error });
         }
       }
-      emit("end", { reason: reason ?? "stopped" });
+      emitEndOnce(reason ?? "stopped");
     },
   };
 };

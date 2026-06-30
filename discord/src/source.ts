@@ -1,12 +1,19 @@
 import { Readable, Transform } from "node:stream";
 import type { AudioFormat } from "@absolutejs/voice";
 import type {
+  ChatMessage,
+  MeetingCapabilities,
   MeetingParticipant,
   MeetingSource,
   MeetingSourceEventMap,
   SpeakAudio,
 } from "@absolutejs/meeting";
-import { Client, GatewayIntentBits } from "discord.js";
+import {
+  Client,
+  GatewayIntentBits,
+  type Message,
+  type VoiceState,
+} from "discord.js";
 import {
   AudioPlayerStatus,
   createAudioPlayer,
@@ -133,6 +140,7 @@ export const createDiscordMeetingSource = (
     >;
   } = {
     audio: new Set(),
+    chat: new Set(),
     end: new Set(),
     error: new Set(),
     participant: new Set(),
@@ -150,7 +158,9 @@ export const createDiscordMeetingSource = (
   let ownsClient = false;
   let ended = false;
   let emptyTimer: ReturnType<typeof setTimeout> | null = null;
-  let voiceStateHandler: (() => void) | null = null;
+  let voiceStateHandler:
+    ((oldState: VoiceState, newState: VoiceState) => void) | null = null;
+  let messageHandler: ((message: Message) => void) | null = null;
   let wasEmpty = false;
   // Base grace before leaving an empty channel (default 5 min). `aloneWindowMs`
   // is the *active* grace — the agent can extend it via setLeaveWhenAloneMs when
@@ -250,7 +260,13 @@ export const createDiscordMeetingSource = (
     opus.pipe(filter).pipe(decoder);
   };
 
+  const capabilities: MeetingCapabilities = {
+    canChat: true,
+    canSpeak: true,
+  };
+
   return {
+    capabilities,
     format: DISCORD_AUDIO_FORMAT,
     on: (event, handler) => {
       listeners[event].add(handler as never);
@@ -270,6 +286,12 @@ export const createDiscordMeetingSource = (
           intents: [
             GatewayIntentBits.Guilds,
             GatewayIntentBits.GuildVoiceStates,
+            // Read the voice channel's text chat. MessageContent is a PRIVILEGED
+            // intent — it must be enabled for the bot app in the Discord Developer
+            // Portal (Bot → Privileged Gateway Intents), or messageCreate arrives
+            // with empty `content`.
+            GatewayIntentBits.GuildMessages,
+            GatewayIntentBits.MessageContent,
           ],
         });
       if (!options.client) {
@@ -298,12 +320,16 @@ export const createDiscordMeetingSource = (
       // doesn't repro in dev.
       connection.on("stateChange", (oldS, newS) => {
         console.info(
-          "[meeting-discord] state " + oldS?.status + " -> " + newS?.status +
+          "[meeting-discord] state " +
+            oldS?.status +
+            " -> " +
+            newS?.status +
             ((newS as { closeCode?: number }).closeCode !== undefined
               ? " closeCode=" + (newS as { closeCode?: number }).closeCode
               : "") +
             ((newS as { reason?: unknown }).reason !== undefined
-              ? " reason=" + JSON.stringify((newS as { reason?: unknown }).reason)
+              ? " reason=" +
+                JSON.stringify((newS as { reason?: unknown }).reason)
               : ""),
         );
       });
@@ -328,8 +354,52 @@ export const createDiscordMeetingSource = (
       // Auto-leave when the channel empties out (e.g. everyone hangs up but the
       // bot keeps sitting there). Recompute occupancy on every voice-state
       // change in the guild, and once now in case it's already just the bot.
-      voiceStateHandler = () => reconcileOccupancy();
+      // Also surface a participant `left` event when a human leaves our channel.
+      voiceStateHandler = (oldState, newState) => {
+        const leftOurChannel =
+          oldState.channelId === options.channelId &&
+          newState.channelId !== options.channelId;
+        if (leftOurChannel) {
+          const member = oldState.member;
+          if (member && !member.user.bot) {
+            const name = member.user.globalName ?? member.user.username;
+            const participant: MeetingParticipant = {
+              id: member.id,
+              platform: "discord",
+              ...(name ? { name } : {}),
+            };
+            emit("participant", { participant, status: "left" });
+          }
+        }
+        reconcileOccupancy();
+      };
       client.on("voiceStateUpdate", voiceStateHandler);
+
+      // Mirror the voice channel's text chat into `chat` events. Discord delivers
+      // messages posted in a voice channel's built-in chat with channelId === the
+      // voice channel id, so we filter to our channel and skip the bot's own (and
+      // any other bot's) messages.
+      messageHandler = (message) => {
+        if (message.author.bot) return;
+        if (message.channelId !== options.channelId) return;
+        const name = message.author.globalName ?? message.author.username;
+        const author: MeetingParticipant = {
+          id: message.author.id,
+          platform: "discord",
+          ...(name ? { name } : {}),
+        };
+        const chat: ChatMessage = {
+          author,
+          authorId: message.author.id,
+          channelId: message.channelId,
+          kind: "message",
+          text: message.content,
+          timestamp: message.createdTimestamp,
+        };
+        emit("chat", { message: chat });
+      };
+      client.on("messageCreate", messageHandler);
+
       reconcileOccupancy();
     },
     speak: async (audio: SpeakAudio) => {
@@ -384,6 +454,15 @@ export const createDiscordMeetingSource = (
         subscription?.unsubscribe();
       }
     },
+    sendChat: async (text) => {
+      if (!client) {
+        throw new Error("discord sendChat: not connected (call start() first)");
+      }
+      const channel = await client.channels.fetch(options.channelId);
+      if (channel?.isTextBased() && "send" in channel) {
+        await channel.send(text);
+      }
+    },
     stop: async (reason) => {
       if (emptyTimer) {
         clearTimeout(emptyTimer);
@@ -392,6 +471,10 @@ export const createDiscordMeetingSource = (
       if (client && voiceStateHandler) {
         client.off("voiceStateUpdate", voiceStateHandler);
         voiceStateHandler = null;
+      }
+      if (client && messageHandler) {
+        client.off("messageCreate", messageHandler);
+        messageHandler = null;
       }
       try {
         connection?.destroy();

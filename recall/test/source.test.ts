@@ -118,12 +118,18 @@ describe("createRecallMeetingSource start", () => {
     expect(calledUrl).toBe("https://us-west-2.recall.ai/api/v1/bot/");
     expect(method).toBe("POST");
     expect(source.botId).toBe("bot_123");
-    const config = (body as unknown as { recording_config: Record<string, unknown> })
-      .recording_config;
+    const config = (
+      body as unknown as { recording_config: Record<string, unknown> }
+    ).recording_config;
     expect(config.audio_separate_raw).toEqual({});
     expect(config.realtime_endpoints).toEqual([
       {
-        events: ["audio_separate_raw.data"],
+        events: [
+          "audio_separate_raw.data",
+          "participant_events.join",
+          "participant_events.leave",
+          "participant_events.chat_message",
+        ],
         type: "websocket",
         url: "wss://pub.example/recall",
       },
