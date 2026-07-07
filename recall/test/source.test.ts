@@ -3,6 +3,7 @@ import {
   createRecallClient,
   createRecallMeetingSource,
   RECALL_AUDIO_FORMAT,
+  estimateMp3DurationMs,
 } from "../src/index";
 
 describe("createRecallMeetingSource ingest", () => {
@@ -134,5 +135,71 @@ describe("createRecallMeetingSource start", () => {
         url: "wss://pub.example/recall",
       },
     ]);
+  });
+});
+
+describe("speak queue", () => {
+  const FRAME_HEADER = [0xff, 0xfb, 0x90, 0x00]; // MPEG-1 L3, 128 kbps
+
+  test("estimateMp3DurationMs reads the first-frame bitrate", () => {
+    const bytes = new Uint8Array(16_000);
+    bytes.set(FRAME_HEADER, 0);
+    // 16000 bytes * 8 bits / 128 kbps = 1000 ms
+    expect(estimateMp3DurationMs(bytes)).toBe(1000);
+    // No header → 128 kbps fallback.
+    expect(estimateMp3DurationMs(new Uint8Array(1600))).toBe(100);
+  });
+
+  const buildSpeakingSource = async () => {
+    const sends: number[] = [];
+    const client = createRecallClient({
+      apiKey: "secret-key",
+      fetchImpl: (async (url: string) => {
+        if (String(url).includes("output_audio")) sends.push(Date.now());
+
+        return new Response(JSON.stringify({ id: "bot_123" }), {
+          headers: { "content-type": "application/json" },
+          status: 201,
+        });
+      }) as unknown as typeof fetch,
+      region: "us-west-2",
+    });
+    const source = createRecallMeetingSource({
+      botName: "Deal Referee",
+      client,
+      enableSpeak: true,
+      meetingUrl: "https://meet.google.com/abc-defg-hij",
+      websocketUrl: "wss://pub.example/recall",
+    });
+    await source.start();
+
+    return { sends, source };
+  };
+
+  test("concurrent speaks serialize on estimated playback", async () => {
+    const { sends, source } = await buildSpeakingSource();
+    // ~100 ms each at the 128 kbps fallback.
+    const clip = new Uint8Array(1600);
+    await Promise.all([
+      source.speak({ data: clip, format: "mp3" }),
+      source.speak({ data: clip, format: "mp3" }),
+    ]);
+    expect(sends).toHaveLength(2);
+    const gap = (sends[1] ?? 0) - (sends[0] ?? 0);
+    expect(gap).toBeGreaterThanOrEqual(80);
+  });
+
+  test("stopSpeaking drops the queued send and releases the wait", async () => {
+    const { sends, source } = await buildSpeakingSource();
+    const clip = new Uint8Array(160_000); // ~10 s estimated
+    const first = source.speak({ data: clip, format: "mp3" });
+    const second = source.speak({ data: clip, format: "mp3" });
+    const started = Date.now();
+    await source.stopSpeaking();
+    await Promise.all([first, second]);
+    // Only the first clip was ever sent; the queued one no-oped, and nothing
+    // waited out the 10 s estimate.
+    expect(sends).toHaveLength(1);
+    expect(Date.now() - started).toBeLessThan(1000);
   });
 });

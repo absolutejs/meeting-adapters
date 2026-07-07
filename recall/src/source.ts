@@ -114,6 +114,33 @@ export type RecallMeetingSource = MeetingSource & {
   notifySocketClosed: (code?: number) => void;
 };
 
+// MPEG-1 Layer III bitrate table (index 1..14) — TTS engines emit CBR, so the
+// first frame header's bitrate makes bytes→duration a solid estimate.
+const MP3_BITRATES_KBPS = [
+  0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320,
+];
+const MP3_HEADER_SCAN_BYTES = 4096;
+const MP3_FALLBACK_KBPS = 128;
+
+/** Estimate an mp3's playback duration from its size + first-frame bitrate.
+ *  bits / kbps = milliseconds. */
+export const estimateMp3DurationMs = (bytes: Uint8Array) => {
+  let kbps = MP3_FALLBACK_KBPS;
+  const scanEnd = Math.min(bytes.length - 2, MP3_HEADER_SCAN_BYTES);
+  for (let i = 0; i < scanEnd; i += 1) {
+    // Frame sync: 11 set bits.
+    if (bytes[i] !== 0xff || ((bytes[i + 1] ?? 0) & 0xe0) !== 0xe0) continue;
+    const index = ((bytes[i + 2] ?? 0) >> 4) & 0x0f;
+    const parsed = MP3_BITRATES_KBPS[index];
+    if (parsed && parsed > 0) {
+      kbps = parsed;
+      break;
+    }
+  }
+
+  return (bytes.length * 8) / kbps;
+};
+
 const decodeBase64 = (b64: string): Uint8Array => {
   if (typeof Buffer !== "undefined") {
     return new Uint8Array(Buffer.from(b64, "base64"));
@@ -189,6 +216,27 @@ export const createRecallMeetingSource = (
   let socketAlive = false;
   let verifyTimer: ReturnType<typeof setTimeout> | null = null;
   let verifyAttempts = 0;
+
+  // Speak-queue state: sends serialize on this chain (Recall's output_audio
+  // replaces in-flight audio), each waiting out its predecessor's estimated
+  // playback. stopSpeaking() bumps the generation (queued sends no-op) and
+  // releases the active wait so the queue drains instantly on barge-in.
+  let speakChain: Promise<void> = Promise.resolve();
+  let speakGeneration = 0;
+  let releasePlaybackWait: (() => void) | null = null;
+
+  const waitEstimatedPlayback = (ms: number) =>
+    new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        releasePlaybackWait = null;
+        resolve();
+      }, ms);
+      releasePlaybackWait = () => {
+        clearTimeout(timer);
+        releasePlaybackWait = null;
+        resolve();
+      };
+    });
 
   // `end` is reachable from several places (real end events, ws-drop heartbeat,
   // explicit stop) — emit it at most once so the meeting finalizes a single time.
@@ -445,7 +493,23 @@ export const createRecallMeetingSource = (
         audio.data instanceof ArrayBuffer
           ? new Uint8Array(audio.data)
           : audio.data;
-      await client.outputAudioMp3(botId, encodeBase64(bytes));
+      // Recall's output_audio REPLACES any in-flight audio, so back-to-back
+      // sends would cut each other off. Serialize: each speak() waits for the
+      // previous one's ESTIMATED playback (size ÷ first-frame bitrate) before
+      // sending, and resolves after its own — matching the Discord adapter's
+      // await-real-playback contract so callers can sentence-stream safely.
+      // stopSpeaking() cancels the pending waits (barge-in cuts the queue).
+      const generation = speakGeneration;
+      const send = async () => {
+        if (generation !== speakGeneration) return;
+        await client.outputAudioMp3(botId, encodeBase64(bytes));
+        await waitEstimatedPlayback(estimateMp3DurationMs(bytes));
+      };
+      // Chain regardless of a predecessor's failure, but let each caller see
+      // only its OWN error.
+      const turn = speakChain.then(send, send);
+      speakChain = turn.catch(() => undefined);
+      await turn;
     },
     sendChat: async (text) => {
       if (!botId) {
@@ -457,7 +521,11 @@ export const createRecallMeetingSource = (
     },
     stopSpeaking: async () => {
       // Barge-in: cut the bot's in-progress audio so it doesn't talk over a
-      // participant who started speaking. No-op before the bot has joined.
+      // participant who started speaking. Also drops anything still queued in
+      // the speak chain (bump the generation + release the playback wait).
+      // No-op before the bot has joined.
+      speakGeneration += 1;
+      releasePlaybackWait?.();
       if (!botId) {
         return;
       }
