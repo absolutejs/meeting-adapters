@@ -499,10 +499,11 @@ export const createRecallMeetingSource = (
       // sending, and resolves after its own — matching the Discord adapter's
       // await-real-playback contract so callers can sentence-stream safely.
       // stopSpeaking() cancels the pending waits (barge-in cuts the queue).
+      const activeBotId = botId;
       const generation = speakGeneration;
       const send = async () => {
         if (generation !== speakGeneration) return;
-        await client.outputAudioMp3(botId, encodeBase64(bytes));
+        await client.outputAudioMp3(activeBotId, encodeBase64(bytes));
         await waitEstimatedPlayback(estimateMp3DurationMs(bytes));
       };
       // Chain regardless of a predecessor's failure, but let each caller see
