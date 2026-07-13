@@ -21,12 +21,20 @@
 		".": {
 			"import": "./dist/index.js",
 			"types": "./dist/index.d.ts"
-		}
+		},
+		"./manifest": {
+			"import": "./dist/manifest.js",
+			"types": "./dist/manifest.d.ts"
+		},
+		"./manifest.json": "./dist/manifest.json"
 	},
 	"license": "Apache-2.0",
 	"author": "Alex Kahn",
+	"absolutejs": {
+		"manifestContract": 1
+	},
 	"scripts": {
-		"build": "rm -rf dist && bun build ./src/index.ts --outdir dist --target bun --external @absolutejs/voice --external @absolutejs/meeting && tsc --emitDeclarationOnly --project tsconfig.json",
+		"build": "rm -rf dist && bun build ./src/index.ts ./src/manifest.ts --outdir dist --root src --target bun --external @absolutejs/voice --external @absolutejs/meeting && tsc --emitDeclarationOnly --project tsconfig.json && absolute-manifest emit",
 		"format": "prettier --write \"./**/*.{js,ts,json,md}\"",
 		"release": "bun run format && bun run build && bun publish",
 		"test": "bun test",
@@ -35,6 +43,10 @@
 	"peerDependencies": {
 		"@absolutejs/meeting": ">=0.0.1-beta.5",
 		"@absolutejs/voice": ">=0.0.22-beta.550"
+	},
+	"dependencies": {
+		"@absolutejs/manifest": "^0.1.0",
+		"@sinclair/typebox": "^0.34.0"
 	},
 	"devDependencies": {
 		"@absolutejs/meeting": "0.0.1-beta.5",
