@@ -81,4 +81,4 @@ against that region's host. Pass `region` (`"us-west-2"` | `"us-east-1"` |
 
 ## License
 
-CC BY-NC 4.0
+Apache License 2.0. See [LICENSE](./LICENSE).
