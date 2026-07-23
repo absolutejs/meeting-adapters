@@ -210,6 +210,7 @@ export const createRecallMeetingSource = (
   let botId: string | null = null;
   let stopped = false;
   let ended = false;
+  let stopPromise: Promise<void> | null = null;
   // Tracks whether the consumer's realtime socket is believed up. Frames arriving
   // (or notifySocketOpen) flip it true; notifySocketClosed flips it false and
   // arms heartbeat verification.
@@ -535,6 +536,7 @@ export const createRecallMeetingSource = (
     start: async () => {
       stopped = false;
       ended = false;
+      stopPromise = null;
       const recordingConfig: RecallRecordingConfig = {
         audio_separate_raw: {},
         ...options.recordingConfig,
@@ -573,16 +575,28 @@ export const createRecallMeetingSource = (
       botId = bot.id;
     },
     stop: async (reason) => {
+      if (stopPromise) return stopPromise;
+
+      // A terminal realtime event means Recall has already completed the bot;
+      // issuing leave_call after that is an invalid command, not cleanup. Keep
+      // the decision and promise stable so concurrent/repeated stop calls never
+      // race a second leave request. Unexpected failures from a valid leave
+      // request still flow through the source's error event below.
+      const shouldLeave = botId !== null && !ended;
       stopped = true;
       cancelVerify();
-      if (botId) {
-        try {
-          await client.leaveBot(botId);
-        } catch (error) {
-          emit("error", { error: error as Error });
+      stopPromise = (async () => {
+        if (shouldLeave && botId) {
+          try {
+            await client.leaveBot(botId);
+          } catch (error) {
+            emit("error", { error: error as Error });
+          }
         }
-      }
-      emitEndOnce(reason ?? "stopped");
+        emitEndOnce(reason ?? "stopped");
+      })();
+
+      return stopPromise;
     },
   };
 };

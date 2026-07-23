@@ -138,6 +138,88 @@ describe("createRecallMeetingSource start", () => {
   });
 });
 
+describe("createRecallMeetingSource stop", () => {
+  const buildSource = async (
+    leaveResponse: () => Response = () =>
+      new Response(JSON.stringify({ id: "bot_123" }), { status: 200 }),
+  ) => {
+    let leaveCalls = 0;
+    const client = createRecallClient({
+      apiKey: "secret-key",
+      fetchImpl: (async (url: string, init: RequestInit) => {
+        if (String(url).endsWith("/leave_call/")) {
+          leaveCalls += 1;
+
+          return leaveResponse();
+        }
+
+        return new Response(JSON.stringify({ id: "bot_123" }), {
+          headers: { "content-type": "application/json" },
+          status: 201,
+        });
+      }) as unknown as typeof fetch,
+      region: "us-west-2",
+    });
+    const source = createRecallMeetingSource({
+      client,
+      meetingUrl: "https://meet.google.com/abc-defg-hij",
+      websocketUrl: "wss://pub.example/recall",
+    });
+    await source.start();
+
+    return { getLeaveCalls: () => leaveCalls, source };
+  };
+
+  test("does not command a bot that Recall already reported terminal", async () => {
+    const { getLeaveCalls, source } = await buildSource();
+    let endEvents = 0;
+    let errors = 0;
+    source.on("end", () => {
+      endEvents += 1;
+    });
+    source.on("error", () => {
+      errors += 1;
+    });
+
+    source.ingest(JSON.stringify({ event: "bot.done" }));
+    await source.stop("finalize");
+
+    expect(getLeaveCalls()).toBe(0);
+    expect(endEvents).toBe(1);
+    expect(errors).toBe(0);
+  });
+
+  test("coalesces concurrent and repeated stop calls into one leave", async () => {
+    const { getLeaveCalls, source } = await buildSource();
+    let endEvents = 0;
+    source.on("end", () => {
+      endEvents += 1;
+    });
+
+    await Promise.all([source.stop("first"), source.stop("second")]);
+    await source.stop("third");
+
+    expect(getLeaveCalls()).toBe(1);
+    expect(endEvents).toBe(1);
+  });
+
+  test("continues to report unexpected failures from a valid leave", async () => {
+    const { getLeaveCalls, source } = await buildSource(
+      () => new Response("provider unavailable", { status: 503 }),
+    );
+    const errors: Error[] = [];
+    source.on("error", ({ error }) => {
+      errors.push(error);
+    });
+
+    await source.stop("operator-requested");
+
+    expect(getLeaveCalls()).toBe(1);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.message).toContain("failed: 503 provider unavailable");
+  });
+});
+
 describe("speak queue", () => {
   const FRAME_HEADER = [0xff, 0xfb, 0x90, 0x00]; // MPEG-1 L3, 128 kbps
 
