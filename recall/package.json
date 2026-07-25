@@ -1,57 +1,83 @@
 {
-	"name": "@absolutejs/meeting-recall",
-	"version": "0.0.1-beta.7",
-	"description": "Recall.ai source adapter for @absolutejs/meeting — Recall joins a Google Meet / Zoom / Teams call as a bot and streams per-participant audio into the meeting core for live transcription + analysis",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/absolutejs/meeting-adapters.git",
-		"directory": "recall"
-	},
-	"homepage": "https://github.com/absolutejs/meeting-adapters/tree/main/recall",
-	"bugs": {
-		"url": "https://github.com/absolutejs/meeting-adapters/issues"
-	},
-	"files": [
-		"dist",
-		"README.md"
-	],
-	"main": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"exports": {
-		".": {
-			"import": "./dist/index.js",
-			"types": "./dist/index.d.ts"
-		},
-		"./manifest": {
-			"import": "./dist/manifest.js",
-			"types": "./dist/manifest.d.ts"
-		},
-		"./manifest.json": "./dist/manifest.json"
-	},
-	"license": "Apache-2.0",
-	"author": "Alex Kahn",
-	"absolutejs": {
-		"manifestContract": 1
-	},
-	"scripts": {
-		"build": "rm -rf dist && bun build ./src/index.ts ./src/manifest.ts --outdir dist --root src --target bun --external @absolutejs/voice --external @absolutejs/meeting && tsc --emitDeclarationOnly --project tsconfig.json && absolute-manifest emit",
-		"format": "prettier --write \"./**/*.{js,ts,json,md}\"",
-		"release": "bun run format && bun run build && bun publish",
-		"test": "bun test",
-		"typecheck": "bun run tsc --noEmit"
-	},
-	"peerDependencies": {
-		"@absolutejs/meeting": ">=0.0.1-beta.5",
-		"@absolutejs/voice": ">=0.0.22-beta.550"
-	},
-	"dependencies": {
-		"@absolutejs/manifest": "^0.1.0",
-		"@sinclair/typebox": "^0.34.0"
-	},
-	"devDependencies": {
-		"@absolutejs/meeting": "0.0.1-beta.5",
-		"@absolutejs/voice": "0.0.22-beta.550",
-		"@types/bun": "1.3.9",
-		"typescript": "^5.9.3"
-	}
+  "name": "@absolutejs/meeting-recall",
+  "version": "0.0.1-beta.8",
+  "description": "Recall.ai source adapter for @absolutejs/meeting — Recall joins a Google Meet / Zoom / Teams call as a bot and streams per-participant audio into the meeting core for live transcription + analysis",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/absolutejs/meeting-adapters.git",
+    "directory": "recall"
+  },
+  "homepage": "https://github.com/absolutejs/meeting-adapters/tree/main/recall",
+  "bugs": {
+    "url": "https://github.com/absolutejs/meeting-adapters/issues"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./manifest": {
+      "import": "./dist/manifest.js",
+      "types": "./dist/manifest.d.ts"
+    },
+    "./manifest.json": "./dist/manifest.json"
+  },
+  "license": "Apache-2.0",
+  "author": "Alex Kahn",
+  "absolutejs": {
+    "manifestContract": 2,
+    "runtimePeers": {
+      "@absolutejs/meeting": {
+        "artifactImports": [],
+        "buildExternals": [
+          "@absolutejs/meeting",
+          "@absolutejs/meeting/*"
+        ],
+        "optional": false,
+        "range": ">=0.0.1-beta.9 <0.1",
+        "tested": "0.0.1-beta.9"
+      },
+      "@absolutejs/voice": {
+        "artifactImports": [],
+        "buildExternals": [
+          "@absolutejs/voice",
+          "@absolutejs/voice/*"
+        ],
+        "optional": false,
+        "range": ">=0.0.22-beta.647 <0.1",
+        "tested": "0.0.22-beta.647"
+      }
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist && bun build ./src/index.ts ./src/manifest.ts --outdir dist --root src --target bun --external @absolutejs/manifest --external '@absolutejs/manifest/*' --external @absolutejs/meeting --external '@absolutejs/meeting/*' --external @absolutejs/voice --external '@absolutejs/voice/*' --external @sinclair/typebox --external '@sinclair/typebox/*' && tsc --emitDeclarationOnly --project tsconfig.json && absolute-manifest emit",
+    "format": "prettier --write \"./**/*.{js,ts,json,md}\"",
+    "release": "bun run check:package && npm publish --access public --tag beta",
+    "test": "bun test",
+    "typecheck": "bun run tsc --noEmit",
+    "verify-package": "absolute-manifest verify-package",
+    "check:package": "bun run format && bun run typecheck && bun run test && bun run verify-package && bun run build && bun run verify-package --artifacts"
+  },
+  "peerDependencies": {
+    "@absolutejs/meeting": ">=0.0.1-beta.9 <0.1",
+    "@absolutejs/voice": ">=0.0.22-beta.647 <0.1"
+  },
+  "dependencies": {
+    "@absolutejs/manifest": "0.7.2",
+    "@sinclair/typebox": "0.34.52"
+  },
+  "devDependencies": {
+    "@absolutejs/meeting": "0.0.1-beta.9",
+    "@absolutejs/voice": "0.0.22-beta.647",
+    "@types/bun": "1.3.14",
+    "elysia": "1.4.29",
+    "prettier": "3.9.6",
+    "typescript": "^5.9.3"
+  }
 }

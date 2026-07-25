@@ -6,7 +6,7 @@ import type { RecallMeetingSourceOptions } from "./source";
  * `client` / `fetchImpl` are instance-valued → wiring concerns; `apiKey`
  * comes from env; `meetingUrl` is per-call → a wiring TODO binding. */
 export const manifest = defineManifest<RecallMeetingSourceOptions>()({
-  contract: 1,
+  contract: 2,
   identity: {
     accent: "#0ea5e9",
     category: "voice",

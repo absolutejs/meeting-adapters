@@ -6,7 +6,7 @@ import type { DiscordMeetingSourceOptions } from "./source";
  * `client` is instance-valued (a pre-built discord.js client) → wiring
  * concern; `token` comes from env. */
 export const manifest = defineManifest<DiscordMeetingSourceOptions>()({
-  contract: 1,
+  contract: 2,
   identity: {
     accent: "#5865f2",
     category: "voice",
@@ -34,12 +34,12 @@ export const manifest = defineManifest<DiscordMeetingSourceOptions>()({
         peers: [
           {
             name: "discord.js",
-            range: ">=14.0.0",
+            range: ">=14.27.0 <15",
             reason: "Discord gateway client",
           },
           {
             name: "@discordjs/voice",
-            range: ">=0.17.0",
+            range: ">=0.19.2 <0.20",
             reason: "voice channel connect + per-user Opus receive",
           },
         ],
