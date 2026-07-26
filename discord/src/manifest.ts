@@ -2,9 +2,9 @@ import { defineImplementation, defineManifest } from "@absolutejs/manifest";
 import { Type } from "@sinclair/typebox";
 import type { DiscordMeetingSourceFactoryOptions } from "./source";
 
-/* Adapter package: everything rides the `meeting/source` implementation.
- * `client` is instance-valued (a pre-built discord.js client) → wiring
- * concern; `token` comes from env. */
+/* Adapter package: everything rides the `meeting/source-factory`
+ * implementation. Provider credentials are configured once; each approved
+ * session supplies its Discord voice channel dynamically. */
 export const manifest = defineManifest<DiscordMeetingSourceFactoryOptions>()({
   contract: 2,
   identity: {

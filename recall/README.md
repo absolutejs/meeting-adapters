@@ -50,7 +50,7 @@ const source = createRecallMeetingSource({
 });
 
 // 2. Wire it into the meeting core + a scribe STT.
-const meeting = createMeeting({
+const meeting = await createMeeting({
   source,
   stt: createDeepgramStt({ apiKey: process.env.DEEPGRAM_API_KEY! }),
   sessionId: crypto.randomUUID(),

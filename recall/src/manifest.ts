@@ -2,9 +2,9 @@ import { defineImplementation, defineManifest } from "@absolutejs/manifest";
 import { Type } from "@sinclair/typebox";
 import type { RecallMeetingSourceFactoryOptions } from "./source";
 
-/* Adapter package: everything rides the `meeting/source` implementation.
- * `client` / `fetchImpl` are instance-valued → wiring concerns; `apiKey`
- * comes from env; `meetingUrl` is per-call → a wiring TODO binding. */
+/* Adapter package: everything rides the `meeting/source-factory`
+ * implementation. Provider credentials and the host websocket are configured
+ * once; each approved session supplies its meeting URL dynamically. */
 export const manifest = defineManifest<RecallMeetingSourceFactoryOptions>()({
   contract: 2,
   identity: {
