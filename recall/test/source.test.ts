@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   createRecallClient,
   createRecallMeetingSource,
+  createRecallMeetingSourceFactory,
   RECALL_AUDIO_FORMAT,
   estimateMp3DurationMs,
 } from "../src/index";
@@ -89,6 +90,30 @@ describe("createRecallMeetingSource ingest", () => {
 });
 
 describe("createRecallMeetingSource start", () => {
+  test("factory binds provider configuration but receives each meeting URL dynamically", async () => {
+    let meetingUrl = "";
+    const factory = createRecallMeetingSourceFactory({
+      apiKey: "secret-key",
+      fetchImpl: (async (_url: string, init: RequestInit) => {
+        meetingUrl = (JSON.parse(String(init.body)) as { meeting_url: string })
+          .meeting_url;
+        return new Response(JSON.stringify({ id: "bot_123" }), {
+          headers: { "content-type": "application/json" },
+          status: 201,
+        });
+      }) as unknown as typeof fetch,
+      websocketUrl: "wss://pub.example/recall",
+    });
+    const source = await factory({
+      sessionId: "session-one",
+      target: "https://meet.google.com/dynamic-target",
+    });
+
+    await source.start();
+
+    expect(meetingUrl).toBe("https://meet.google.com/dynamic-target");
+  });
+
   test("creates a bot whose realtime endpoint points at the websocket URL", async () => {
     let body: Record<string, unknown> | null = null;
     let calledUrl = "";

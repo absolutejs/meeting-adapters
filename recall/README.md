@@ -9,6 +9,11 @@ transcribe the call live with speaker labels.
 
 One Recall integration covers all three platforms — you only pass a meeting URL.
 
+For dynamic applications, `createRecallMeetingSourceFactory` binds the Recall
+credentials and websocket once; `@absolutejs/meeting` supplies each approved
+meeting URL as the managed session target. Studio uses this factory contract,
+so installing the package never creates a bot or joins a call.
+
 ## How it works
 
 Recall's bot dials **out** to a websocket _you_ host and streams

@@ -6,6 +6,7 @@ import type {
   MeetingParticipant,
   MeetingSource,
   MeetingSourceEventMap,
+  MeetingSourceFactory,
   SpeakAudio,
 } from "@absolutejs/meeting";
 import {
@@ -69,6 +70,11 @@ export type DiscordMeetingSourceOptions = {
    *  Default 30000. Set to 0 to disable and stay until explicitly stopped. */
   leaveWhenAloneMs?: number;
 };
+
+export type DiscordMeetingSourceFactoryOptions = Omit<
+  DiscordMeetingSourceOptions,
+  "channelId"
+>;
 
 /** Downmix interleaved 16-bit LE stereo PCM to mono (average L+R). */
 export const stereoToMono = (stereo: Buffer): Uint8Array => {
@@ -493,3 +499,12 @@ export const createDiscordMeetingSource = (
     },
   };
 };
+
+/**
+ * Bind the Discord guild, credentials, and voice behavior once while taking
+ * the per-session voice-channel id from the managed meeting target.
+ */
+export const createDiscordMeetingSourceFactory =
+  (options: DiscordMeetingSourceFactoryOptions): MeetingSourceFactory =>
+  ({ target }) =>
+    createDiscordMeetingSource({ ...options, channelId: target });

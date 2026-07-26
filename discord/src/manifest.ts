@@ -1,11 +1,11 @@
 import { defineImplementation, defineManifest } from "@absolutejs/manifest";
 import { Type } from "@sinclair/typebox";
-import type { DiscordMeetingSourceOptions } from "./source";
+import type { DiscordMeetingSourceFactoryOptions } from "./source";
 
 /* Adapter package: everything rides the `meeting/source` implementation.
  * `client` is instance-valued (a pre-built discord.js client) → wiring
  * concern; `token` comes from env. */
-export const manifest = defineManifest<DiscordMeetingSourceOptions>()({
+export const manifest = defineManifest<DiscordMeetingSourceFactoryOptions>()({
   contract: 2,
   identity: {
     accent: "#5865f2",
@@ -17,9 +17,9 @@ export const manifest = defineManifest<DiscordMeetingSourceOptions>()({
     tagline: "Let the meeting bot join your Discord voice channels.",
   },
   implements: [
-    defineImplementation<DiscordMeetingSourceOptions>()({
-      contract: "meeting/source",
-      factory: "createDiscordMeetingSource",
+    defineImplementation<DiscordMeetingSourceFactoryOptions>()({
+      contract: "meeting/source-factory",
+      factory: "createDiscordMeetingSourceFactory",
       from: "@absolutejs/meeting-discord",
       requires: {
         env: [
@@ -45,10 +45,6 @@ export const manifest = defineManifest<DiscordMeetingSourceOptions>()({
         ],
       },
       settings: Type.Object({
-        channelId: Type.String({
-          description: "The voice channel the bot joins and listens in.",
-          title: "Voice channel id",
-        }),
         guildId: Type.String({
           description: "The Discord server the voice channel belongs to.",
           title: "Server id",
@@ -72,11 +68,11 @@ export const manifest = defineManifest<DiscordMeetingSourceOptions>()({
       }),
       title: "Discord voice channel",
       wiring: {
-        code: "createDiscordMeetingSource({ token: ${env.DISCORD_BOT_TOKEN} ?? '', ...${settings} })",
+        code: "createDiscordMeetingSourceFactory({ token: ${env.DISCORD_BOT_TOKEN} ?? '', ...${settings} })",
         imports: [
           {
             from: "@absolutejs/meeting-discord",
-            names: ["createDiscordMeetingSource"],
+            names: ["createDiscordMeetingSourceFactory"],
           },
         ],
       },

@@ -5,6 +5,7 @@ import type {
   MeetingParticipant,
   MeetingSource,
   MeetingSourceEventMap,
+  MeetingSourceFactory,
   SpeakAudio,
 } from "@absolutejs/meeting";
 import {
@@ -87,6 +88,11 @@ export type RecallMeetingSourceOptions = {
     backoffMs?: number;
   };
 } & Partial<RecallClientOptions>;
+
+export type RecallMeetingSourceFactoryOptions = Omit<
+  RecallMeetingSourceOptions,
+  "meetingUrl"
+>;
 
 export type RecallMeetingSource = MeetingSource & {
   /** The Recall bot id, available once `start()` resolves. */
@@ -600,3 +606,12 @@ export const createRecallMeetingSource = (
     },
   };
 };
+
+/**
+ * Bind Recall credentials, region, websocket, and bot behavior once while
+ * leaving the per-call meeting URL to the managed execution boundary.
+ */
+export const createRecallMeetingSourceFactory =
+  (options: RecallMeetingSourceFactoryOptions): MeetingSourceFactory =>
+  ({ target }) =>
+    createRecallMeetingSource({ ...options, meetingUrl: target });

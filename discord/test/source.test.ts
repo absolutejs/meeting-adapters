@@ -1,9 +1,23 @@
 import { describe, expect, test } from "bun:test";
 import {
   createDiscordMeetingSource,
+  createDiscordMeetingSourceFactory,
   DISCORD_AUDIO_FORMAT,
   stereoToMono,
 } from "../src/index";
+
+test("Discord source factory receives each voice channel dynamically", async () => {
+  const factory = createDiscordMeetingSourceFactory({
+    client: {} as never,
+    guildId: "guild-1",
+  });
+  const source = await factory({
+    sessionId: "session-1",
+    target: "voice-channel-2",
+  });
+
+  expect(source.format).toEqual(DISCORD_AUDIO_FORMAT);
+});
 
 describe("stereoToMono", () => {
   test("averages left + right per frame", () => {

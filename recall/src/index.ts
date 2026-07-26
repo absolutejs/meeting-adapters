@@ -13,8 +13,10 @@ export {
 } from "./client";
 export {
   createRecallMeetingSource,
+  createRecallMeetingSourceFactory,
   estimateMp3DurationMs,
   RECALL_AUDIO_FORMAT,
   type RecallMeetingSource,
+  type RecallMeetingSourceFactoryOptions,
   type RecallMeetingSourceOptions,
 } from "./source";

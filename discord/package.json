@@ -1,6 +1,6 @@
 {
   "name": "@absolutejs/meeting-discord",
-  "version": "0.0.1-beta.15",
+  "version": "0.0.1-beta.16",
   "description": "Discord voice source adapter for @absolutejs/meeting — a bot joins a Discord voice channel and streams per-participant audio (speakers known, no diarization needed) into the meeting core for live transcription + analysis",
   "repository": {
     "type": "git",
@@ -44,8 +44,8 @@
           "@absolutejs/meeting/*"
         ],
         "optional": false,
-        "range": ">=0.0.1-beta.9 <0.1",
-        "tested": "0.0.1-beta.9"
+        "range": ">=0.0.1-beta.10 <0.1",
+        "tested": "0.0.1-beta.10"
       },
       "@absolutejs/voice": {
         "artifactImports": [],
@@ -93,7 +93,7 @@
     "check:package": "bun run format && bun run typecheck && bun run test && bun run verify-package && bun run build && bun run verify-package --artifacts"
   },
   "peerDependencies": {
-    "@absolutejs/meeting": ">=0.0.1-beta.9 <0.1",
+    "@absolutejs/meeting": ">=0.0.1-beta.10 <0.1",
     "@absolutejs/voice": ">=0.0.22-beta.647 <0.1",
     "@discordjs/voice": ">=0.19.2 <0.20",
     "discord.js": ">=14.27.0 <15"
@@ -105,7 +105,7 @@
     "prism-media": "1.3.5"
   },
   "devDependencies": {
-    "@absolutejs/meeting": "0.0.1-beta.9",
+    "@absolutejs/meeting": "0.0.1-beta.10",
     "@absolutejs/voice": "0.0.22-beta.647",
     "@discordjs/voice": "0.19.2",
     "@types/bun": "1.3.14",

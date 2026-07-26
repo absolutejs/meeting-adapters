@@ -1,11 +1,11 @@
 import { defineImplementation, defineManifest } from "@absolutejs/manifest";
 import { Type } from "@sinclair/typebox";
-import type { RecallMeetingSourceOptions } from "./source";
+import type { RecallMeetingSourceFactoryOptions } from "./source";
 
 /* Adapter package: everything rides the `meeting/source` implementation.
  * `client` / `fetchImpl` are instance-valued → wiring concerns; `apiKey`
  * comes from env; `meetingUrl` is per-call → a wiring TODO binding. */
-export const manifest = defineManifest<RecallMeetingSourceOptions>()({
+export const manifest = defineManifest<RecallMeetingSourceFactoryOptions>()({
   contract: 2,
   identity: {
     accent: "#0ea5e9",
@@ -17,9 +17,9 @@ export const manifest = defineManifest<RecallMeetingSourceOptions>()({
     tagline: "Send the meeting bot into Google Meet, Zoom, and Teams calls.",
   },
   implements: [
-    defineImplementation<RecallMeetingSourceOptions>()({
-      contract: "meeting/source",
-      factory: "createRecallMeetingSource",
+    defineImplementation<RecallMeetingSourceFactoryOptions>()({
+      contract: "meeting/source-factory",
+      factory: "createRecallMeetingSourceFactory",
       from: "@absolutejs/meeting-recall",
       requires: {
         env: [
@@ -62,33 +62,21 @@ export const manifest = defineManifest<RecallMeetingSourceOptions>()({
             },
           ),
         ),
-        websocketUrl: Type.Optional(
-          Type.String({
-            description:
-              "Public wss:// endpoint on your server that Recall streams call audio to. Forward each message to the source's ingest().",
-            examples: ["wss://yoursite.com/meeting/audio"],
-            title: "Realtime audio endpoint",
-          }),
-        ),
+        websocketUrl: Type.String({
+          description:
+            "Public wss:// endpoint on your server that Recall streams call audio to. Route frames by bot/session and forward them to the matching source's ingest().",
+          examples: ["wss://yoursite.com/meeting/audio"],
+          format: "uri",
+          title: "Realtime audio endpoint",
+        }),
       }),
       title: "Recall.ai (Google Meet / Zoom / Teams)",
       wiring: {
-        code: [
-          "(() => {",
-          "\t// TODO: the meeting URL comes from your app, per call.",
-          "\tconst meetingUrl = '';",
-          "\tconst source = createRecallMeetingSource({ apiKey: ${env.RECALL_API_KEY} ?? '', meetingUrl, ...${settings} });",
-          "\t// Your websocket route (at websocketUrl) must pipe Recall's frames in:",
-          "\t//   open    -> source.notifySocketOpen()",
-          "\t//   message -> source.ingest(raw)",
-          "\t//   close   -> source.notifySocketClosed(code)",
-          "\treturn source;",
-          "})()",
-        ].join("\n"),
+        code: "createRecallMeetingSourceFactory({ apiKey: ${env.RECALL_API_KEY} ?? '', ...${settings} })",
         imports: [
           {
             from: "@absolutejs/meeting-recall",
-            names: ["createRecallMeetingSource"],
+            names: ["createRecallMeetingSourceFactory"],
           },
         ],
       },
