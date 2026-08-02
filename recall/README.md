@@ -11,8 +11,9 @@ One Recall integration covers all three platforms — you only pass a meeting UR
 
 For dynamic applications, `createRecallMeetingSourceFactory` binds the Recall
 credentials and websocket once; `@absolutejs/meeting` supplies each approved
-meeting URL as the managed session target. Studio uses this factory contract,
-so installing the package never creates a bot or joins a call.
+meeting URL as the managed session target. The hosted AbsoluteJS.ai platform
+uses this factory contract, so installing the package never creates a bot or
+joins a call.
 
 ## How it works
 

@@ -1,8 +1,9 @@
 # @absolutejs/meeting-discord
 
-The Studio adapter uses `createDiscordMeetingSourceFactory` to bind the bot and
-guild configuration once. Each governed Meeting session supplies its voice
-channel id dynamically, so installation never logs in or joins a channel.
+The hosted AbsoluteJS.ai platform uses `createDiscordMeetingSourceFactory` to
+bind the bot and guild configuration once. Each governed Meeting session
+supplies its voice channel id dynamically, so installation never logs in or
+joins a channel.
 
 Discord voice source adapter for
 [`@absolutejs/meeting`](https://github.com/absolutejs/meeting). A bot joins a
