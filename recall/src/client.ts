@@ -104,8 +104,10 @@ export type RecallClient = {
   >;
   /** Make the bot leave the call (keeps the bot record + recordings). */
   leaveBot: (botId: string) => Promise<RecallBot>;
-  /** Delete the bot record entirely. */
+  /** Cancel a scheduled bot before it joins a call. */
   deleteBot: (botId: string) => Promise<void>;
+  /** Permanently delete recorded media after it has been durably stored. */
+  deleteBotMedia: (botId: string) => Promise<void>;
   /**
    * Play an MP3 (base64) through the bot into the call. Requires the bot to
    * have been created with `automatic_audio_output`; otherwise Recall returns
@@ -167,6 +169,9 @@ export const createRecallClient = (
       }).then((res) => res.json())) as RecallBot,
     deleteBot: async (botId) => {
       await request(`/bot/${botId}/`, { method: "DELETE" });
+    },
+    deleteBotMedia: async (botId) => {
+      await request(`/bot/${botId}/delete_media/`, { method: "POST" });
     },
     getBot: async (botId) =>
       (await request(`/bot/${botId}/`).then((res) => res.json())) as RecallBot,

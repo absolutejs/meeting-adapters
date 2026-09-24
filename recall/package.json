@@ -1,6 +1,6 @@
 {
   "name": "@absolutejs/meeting-recall",
-  "version": "0.0.1-beta.10",
+  "version": "0.0.1-beta.11",
   "description": "Recall.ai source adapter for @absolutejs/meeting — Recall joins a Google Meet / Zoom / Teams call as a bot and streams per-participant audio into the meeting core for live transcription + analysis",
   "repository": {
     "type": "git",
@@ -31,29 +31,7 @@
   "license": "Apache-2.0",
   "author": "Alex Kahn",
   "absolutejs": {
-    "manifestContract": 2,
-    "runtimePeers": {
-      "@absolutejs/meeting": {
-        "artifactImports": [],
-        "buildExternals": [
-          "@absolutejs/meeting",
-          "@absolutejs/meeting/*"
-        ],
-        "optional": false,
-        "range": ">=0.0.1-beta.10 <0.1",
-        "tested": "0.0.1-beta.11"
-      },
-      "@absolutejs/voice": {
-        "artifactImports": [],
-        "buildExternals": [
-          "@absolutejs/voice",
-          "@absolutejs/voice/*"
-        ],
-        "optional": false,
-        "range": ">=0.0.22-beta.647 <0.1",
-        "tested": "0.0.22-beta.647"
-      }
-    }
+    "manifestContract": 2
   },
   "scripts": {
     "build": "rm -rf dist && bun build ./src/index.ts ./src/manifest.ts --outdir dist --root src --target bun --external @absolutejs/manifest --external '@absolutejs/manifest/*' --external @absolutejs/meeting --external '@absolutejs/meeting/*' --external @absolutejs/voice --external '@absolutejs/voice/*' --external @sinclair/typebox --external '@sinclair/typebox/*' && tsc --emitDeclarationOnly --project tsconfig.json && absolute-manifest emit",
@@ -62,14 +40,14 @@
     "test": "bun test",
     "typecheck": "bun run tsc --noEmit",
     "verify-package": "absolute-manifest verify-package",
-    "check:package": "bun run format && bun run typecheck && bun run test && bun run verify-package && bun run build && bun run verify-package --artifacts"
+    "check:package": "bun run format && bun run typecheck && bun run test && bun run verify-package && bun run build"
   },
   "peerDependencies": {
     "@absolutejs/meeting": ">=0.0.1-beta.10 <0.1",
     "@absolutejs/voice": ">=0.0.22-beta.647 <0.1"
   },
   "dependencies": {
-    "@absolutejs/manifest": "0.7.2",
+    "@absolutejs/manifest": "0.9.0",
     "@sinclair/typebox": "0.34.52"
   },
   "devDependencies": {
