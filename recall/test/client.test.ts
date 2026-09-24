@@ -28,3 +28,44 @@ test("media deletion propagates provider errors so cleanup is not reported as su
     RecallApiError,
   );
 });
+
+test("client cancellation reaches the transport", async () => {
+  const controller = new AbortController();
+  let signal: AbortSignal | null | undefined;
+  const client = createRecallClient({
+    apiKey: "test-key",
+    signal: controller.signal,
+    fetchImpl: (async (_url, init) => {
+      signal = init?.signal;
+      controller.abort();
+      signal?.throwIfAborted();
+      return Response.json({ id: "bot" });
+    }) as typeof fetch,
+  });
+  await expect(client.getBot("bot")).rejects.toBeDefined();
+  expect(signal?.aborted).toBe(true);
+});
+
+test("deadline cancels a stalled response body", async () => {
+  const server = Bun.serve({
+    port: 0,
+    fetch: () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"id":'));
+          },
+        }),
+      ),
+  });
+  try {
+    const client = createRecallClient({
+      apiKey: "test-key",
+      baseUrl: server.url.toString(),
+      requestTimeoutMs: 40,
+    });
+    await expect(client.getBot("bot")).rejects.toBeDefined();
+  } finally {
+    server.stop(true);
+  }
+});

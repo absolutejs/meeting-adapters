@@ -25,6 +25,10 @@ export type RecallClientOptions = {
   region?: RecallRegion;
   /** Inject a fetch implementation (tests, custom agents). Defaults to global fetch. */
   fetchImpl?: typeof fetch;
+  /** Cancel requests and response-body reads for this client. */
+  signal?: AbortSignal;
+  /** Per-request deadline, including response-body reads. Defaults to 30 seconds. */
+  requestTimeoutMs?: number;
 };
 
 export type RecallRealtimeEndpoint = {
@@ -146,6 +150,10 @@ export const createRecallClient = (
     const method = init?.method ?? "GET";
     const res = await doFetch(`${baseUrl}${path}`, {
       ...init,
+      signal: AbortSignal.any([
+        AbortSignal.timeout(options.requestTimeoutMs ?? 30_000),
+        ...(options.signal ? [options.signal] : []),
+      ]),
       headers: {
         Authorization: options.apiKey,
         "Content-Type": "application/json",
