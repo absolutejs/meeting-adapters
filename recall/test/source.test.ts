@@ -114,6 +114,32 @@ describe("createRecallMeetingSource start", () => {
     expect(meetingUrl).toBe("https://meet.google.com/dynamic-target");
   });
 
+  test("resumes an existing bot without creating another", async () => {
+    let calls = 0;
+    const client = createRecallClient({
+      apiKey: "secret-key",
+      fetchImpl: (async () => {
+        calls += 1;
+
+        return new Response("{}", { status: 200 });
+      }) as unknown as typeof fetch,
+      region: "us-west-2",
+    });
+    const source = createRecallMeetingSource({
+      botId: "bot_existing",
+      client,
+      enableSpeak: true,
+      meetingUrl: "https://meet.google.com/abc-defg-hij",
+      websocketUrl: "wss://pub.example/recall",
+    });
+
+    await source.start();
+
+    expect(calls).toBe(0);
+    expect(source.botId).toBe("bot_existing");
+    expect(source.capabilities?.canSpeak).toBe(true);
+  });
+
   test("creates a bot whose realtime endpoint points at the websocket URL", async () => {
     let body: Record<string, unknown> | null = null;
     let calledUrl = "";
