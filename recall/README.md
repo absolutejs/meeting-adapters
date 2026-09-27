@@ -77,7 +77,9 @@ against that region's host. Pass `region` (`"us-west-2"` | `"us-east-1"` |
 
 - `createRecallMeetingSource(options)` → `MeetingSource & { botId, ingest }`.
   - `start()` creates the bot with a realtime websocket endpoint pointed at
-    `websocketUrl`.
+    `websocketUrl` — or, given `botId`, resumes that bot without creating one
+    (for picking a call back up after your server restarts; Recall redials the
+    websocket for 90 seconds).
   - `ingest(frame)` decodes a realtime frame (JSON string, bytes, or object)
     into `audio` / `participant` events.
   - `stop()` makes the bot leave the call.

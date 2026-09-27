@@ -58,6 +58,15 @@ export type RecallMeetingSourceOptions = {
   websocketUrl: string;
   /** Bot display name shown in the call. Defaults to "Deal Referee". */
   botName?: string;
+  /**
+   * Resume an existing bot instead of creating one — e.g. after your server
+   * restarts mid-call. `start()` then makes no API call: the bot keeps the
+   * meeting, websocket URL and audio settings it was created with, and Recall
+   * redials that websocket (it retries a dropped realtime connection every 3 s,
+   * 30 times). Pass the same `enableSpeak` the bot was created with so
+   * `capabilities` stay accurate.
+   */
+  botId?: string;
   /** Extra recording_config merged onto the realtime audio config. */
   recordingConfig?: RecallRecordingConfig;
   /**
@@ -543,6 +552,11 @@ export const createRecallMeetingSource = (
       stopped = false;
       ended = false;
       stopPromise = null;
+      if (options.botId) {
+        botId = options.botId;
+
+        return;
+      }
       const recordingConfig: RecallRecordingConfig = {
         audio_separate_raw: {},
         ...options.recordingConfig,
