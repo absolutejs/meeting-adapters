@@ -337,3 +337,51 @@ describe("speak queue", () => {
     expect(Date.now() - started).toBeLessThan(1000);
   });
 });
+
+describe("output media", () => {
+  const build = (extra: Record<string, unknown>) => {
+    const bodies: Record<string, unknown>[] = [];
+    const client = createRecallClient({
+      apiKey: "secret-key",
+      fetchImpl: (async (_url: string, init?: RequestInit) => {
+        if (init?.body) bodies.push(JSON.parse(String(init.body)));
+        return new Response(JSON.stringify({ id: "bot_123" }), {
+          headers: { "content-type": "application/json" },
+          status: 201,
+        });
+      }) as unknown as typeof fetch,
+      region: "us-west-2",
+    });
+    const source = createRecallMeetingSource({
+      client,
+      meetingUrl: "https://meet.google.com/abc-defg-hij",
+      websocketUrl: "wss://pub.example/recall",
+      ...extra,
+    });
+    return { bodies, source };
+  };
+
+  test("creates the bot with the webpage as its camera and the chosen variant", async () => {
+    const { bodies, source } = build({
+      outputMedia: { url: "https://app.example/voice/1", variant: "web_4_core" },
+    });
+    await source.start();
+    expect(bodies[0]?.output_media).toEqual({
+      camera: { config: { url: "https://app.example/voice/1" }, kind: "webpage" },
+    });
+    expect(bodies[0]?.variant).toEqual({
+      google_meet: "web_4_core",
+      microsoft_teams: "web_4_core",
+      zoom: "web_4_core",
+    });
+    expect(bodies[0]?.automatic_audio_output).toBeUndefined();
+  });
+
+  test("refuses to combine output media with output audio", async () => {
+    const { source } = build({
+      enableSpeak: true,
+      outputMedia: { url: "https://app.example/voice/1" },
+    });
+    await expect(source.start()).rejects.toThrow(/mutually exclusive/);
+  });
+});

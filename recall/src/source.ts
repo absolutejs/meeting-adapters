@@ -77,6 +77,18 @@ export type RecallMeetingSourceOptions = {
    */
   enableSpeak?: boolean | RecallAutomaticAudioOutput;
   /**
+   * Stream a webpage as the bot's camera, with its audio going into the call
+   * (Recall "output media"). A voice agent plays speech from that page as a
+   * continuous stream instead of uploading clips, so there's no per-clip
+   * start-up delay. Recall makes this and `enableSpeak`/`speak()` mutually
+   * exclusive. `variant` picks the bot's machine for every platform; Recall
+   * recommends `web_4_core` for smooth audio (it costs more).
+   */
+  outputMedia?: {
+    url: string;
+    variant?: "web" | "web_4_core" | "web_gpu";
+  };
+  /**
    * Heartbeat + reconnect resilience for the realtime socket.
    *
    * Recall dials the realtime socket OUT to *your* server (`websocketUrl`), so
@@ -628,12 +640,36 @@ export const createRecallMeetingSource = (
           : options.enableSpeak === false || options.enableSpeak === undefined
             ? undefined
             : options.enableSpeak;
+      if (options.outputMedia && automaticAudioOutput)
+        throw new Error(
+          "recall: outputMedia and enableSpeak can't be combined — Recall makes output media and output audio mutually exclusive",
+        );
+      const variant = options.outputMedia?.variant;
       const bot = await client.createBot({
         bot_name: options.botName ?? "Deal Referee",
         meeting_url: options.meetingUrl,
         recording_config: recordingConfig,
         ...(automaticAudioOutput
           ? { automatic_audio_output: automaticAudioOutput }
+          : {}),
+        ...(options.outputMedia
+          ? {
+              output_media: {
+                camera: {
+                  config: { url: options.outputMedia.url },
+                  kind: "webpage",
+                },
+              },
+            }
+          : {}),
+        ...(variant
+          ? {
+              variant: {
+                google_meet: variant,
+                microsoft_teams: variant,
+                zoom: variant,
+              },
+            }
           : {}),
       });
       botId = bot.id;
