@@ -89,6 +89,11 @@ export type RecallMeetingSourceOptions = {
     variant?: "web" | "web_4_core" | "web_gpu";
   };
   /**
+   * Pass the bot's own audio frames on as `audio`. Default false: they're
+   * dropped, so a transcript never contains what the bot itself said.
+   */
+  hearOwnAudio?: boolean;
+  /**
    * Heartbeat + reconnect resilience for the realtime socket.
    *
    * Recall dials the realtime socket OUT to *your* server (`websocketUrl`), so
@@ -394,6 +399,7 @@ export const createRecallMeetingSource = (
     cancelVerify();
   };
 
+  const botName = options.botName ?? "Deal Referee";
   const handleAudioFrame = (data: Record<string, unknown>) => {
     // Recall nests the payload as data.data.{buffer,timestamp} + data.participant.
     const inner = asRecord(data.data);
@@ -406,6 +412,11 @@ export const createRecallMeetingSource = (
     const participant = asRecord(data.participant ?? inner.participant);
     const participantId =
       participant.id !== undefined ? String(participant.id) : undefined;
+
+    // The bot's own audio (with output media, or when the recording includes
+    // the bot) would otherwise be transcribed as if someone in the call said
+    // it, and its constant stream would claim every turn as the bot's.
+    if (!options.hearOwnAudio && participant.name === botName) return;
 
     if (participantId && !seenParticipants.has(participantId)) {
       seenParticipants.add(participantId);
@@ -646,7 +657,7 @@ export const createRecallMeetingSource = (
         );
       const variant = options.outputMedia?.variant;
       const bot = await client.createBot({
-        bot_name: options.botName ?? "Deal Referee",
+        bot_name: botName,
         meeting_url: options.meetingUrl,
         recording_config: recordingConfig,
         ...(automaticAudioOutput

@@ -385,3 +385,45 @@ describe("output media", () => {
     await expect(source.start()).rejects.toThrow(/mutually exclusive/);
   });
 });
+
+describe("the bot's own audio", () => {
+  const frame = (name: string, id: number) => ({
+    data: {
+      data: { buffer: Buffer.from([1, 2]).toString("base64") },
+      participant: { id, name },
+    },
+    event: "audio_separate_raw.data",
+  });
+
+  test("is dropped, so the bot never transcribes itself", () => {
+    const source = createRecallMeetingSource({
+      apiKey: "x",
+      botName: "Juniper (recording)",
+      meetingUrl: "https://meet.google.com/abc-defg-hij",
+      websocketUrl: "wss://example/ws",
+    });
+    const speakers: string[] = [];
+    source.on("audio", ({ participant }) => {
+      if (participant) speakers.push(participant);
+    });
+    source.ingest(frame("Juniper (recording)", 1));
+    source.ingest(frame("Alice", 2));
+    expect(speakers).toEqual(["2"]);
+  });
+
+  test("passes through when asked for", () => {
+    const source = createRecallMeetingSource({
+      apiKey: "x",
+      botName: "Juniper (recording)",
+      hearOwnAudio: true,
+      meetingUrl: "https://meet.google.com/abc-defg-hij",
+      websocketUrl: "wss://example/ws",
+    });
+    const speakers: string[] = [];
+    source.on("audio", ({ participant }) => {
+      if (participant) speakers.push(participant);
+    });
+    source.ingest(frame("Juniper (recording)", 1));
+    expect(speakers).toEqual(["1"]);
+  });
+});
