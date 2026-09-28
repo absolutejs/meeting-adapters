@@ -274,11 +274,12 @@ describe("createRecallMeetingSource stop", () => {
 describe("speak queue", () => {
   const FRAME_HEADER = [0xff, 0xfb, 0x90, 0x00]; // MPEG-1 L3, 128 kbps
 
-  test("estimateMp3DurationMs reads the first-frame bitrate", () => {
+  test("estimateMp3DurationMs counts past the last readable frame at its bitrate", () => {
     const bytes = new Uint8Array(16_000);
     bytes.set(FRAME_HEADER, 0);
-    // 16000 bytes * 8 bits / 128 kbps = 1000 ms
-    expect(estimateMp3DurationMs(bytes)).toBe(1000);
+    // One frame, then 16000 bytes in all at 128 kbps ≈ 1000 ms (frame
+    // lengths round, so within a few ms).
+    expect(estimateMp3DurationMs(bytes)).toBeCloseTo(1000, -1);
     // No header → 128 kbps fallback.
     expect(estimateMp3DurationMs(new Uint8Array(1600))).toBe(100);
   });
@@ -334,5 +335,95 @@ describe("speak queue", () => {
     // waited out the 10 s estimate.
     expect(sends).toHaveLength(1);
     expect(Date.now() - started).toBeLessThan(1000);
+  });
+});
+
+describe("output media", () => {
+  const build = (extra: Record<string, unknown>) => {
+    const bodies: Record<string, unknown>[] = [];
+    const client = createRecallClient({
+      apiKey: "secret-key",
+      fetchImpl: (async (_url: string, init?: RequestInit) => {
+        if (init?.body) bodies.push(JSON.parse(String(init.body)));
+        return new Response(JSON.stringify({ id: "bot_123" }), {
+          headers: { "content-type": "application/json" },
+          status: 201,
+        });
+      }) as unknown as typeof fetch,
+      region: "us-west-2",
+    });
+    const source = createRecallMeetingSource({
+      client,
+      meetingUrl: "https://meet.google.com/abc-defg-hij",
+      websocketUrl: "wss://pub.example/recall",
+      ...extra,
+    });
+    return { bodies, source };
+  };
+
+  test("creates the bot with the webpage as its camera and the chosen variant", async () => {
+    const { bodies, source } = build({
+      outputMedia: { url: "https://app.example/voice/1", variant: "web_4_core" },
+    });
+    await source.start();
+    expect(bodies[0]?.output_media).toEqual({
+      camera: { config: { url: "https://app.example/voice/1" }, kind: "webpage" },
+    });
+    expect(bodies[0]?.variant).toEqual({
+      google_meet: "web_4_core",
+      microsoft_teams: "web_4_core",
+      zoom: "web_4_core",
+    });
+    expect(bodies[0]?.automatic_audio_output).toBeUndefined();
+  });
+
+  test("refuses to combine output media with output audio", async () => {
+    const { source } = build({
+      enableSpeak: true,
+      outputMedia: { url: "https://app.example/voice/1" },
+    });
+    await expect(source.start()).rejects.toThrow(/mutually exclusive/);
+  });
+});
+
+describe("the bot's own audio", () => {
+  const frame = (name: string, id: number) => ({
+    data: {
+      data: { buffer: Buffer.from([1, 2]).toString("base64") },
+      participant: { id, name },
+    },
+    event: "audio_separate_raw.data",
+  });
+
+  test("is dropped, so the bot never transcribes itself", () => {
+    const source = createRecallMeetingSource({
+      apiKey: "x",
+      botName: "Juniper (recording)",
+      meetingUrl: "https://meet.google.com/abc-defg-hij",
+      websocketUrl: "wss://example/ws",
+    });
+    const speakers: string[] = [];
+    source.on("audio", ({ participant }) => {
+      if (participant) speakers.push(participant);
+    });
+    source.ingest(frame("Juniper (recording)", 1));
+    source.ingest(frame("Alice", 2));
+    expect(speakers).toEqual(["2"]);
+  });
+
+  test("passes through when asked for", () => {
+    const source = createRecallMeetingSource({
+      apiKey: "x",
+      botName: "Juniper (recording)",
+      hearOwnAudio: true,
+      meetingUrl: "https://meet.google.com/abc-defg-hij",
+      websocketUrl: "wss://example/ws",
+    });
+    const speakers: string[] = [];
+    source.on("audio", ({ participant }) => {
+      if (participant) speakers.push(participant);
+    });
+    source.ingest(frame("Juniper (recording)", 1));
+    expect(speakers).toEqual(["1"]);
   });
 });
