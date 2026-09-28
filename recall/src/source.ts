@@ -129,31 +129,75 @@ export type RecallMeetingSource = MeetingSource & {
   notifySocketClosed: (code?: number) => void;
 };
 
-// MPEG-1 Layer III bitrate table (index 1..14) — TTS engines emit CBR, so the
-// first frame header's bitrate makes bytes→duration a solid estimate.
-const MP3_BITRATES_KBPS = [
+// Layer III bitrates (kbps) by header index, for MPEG-1 and for MPEG-2/2.5,
+// which TTS engines often use at low sample rates (Deepgram Aura is MPEG-2 at
+// 48 kbps; read with the MPEG-1 table it looks like 80 kbps and plays ~40%
+// longer than estimated, so the next clip cut it off).
+const MPEG1_L3_KBPS = [
   0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320,
 ];
-const MP3_HEADER_SCAN_BYTES = 4096;
+const MPEG2_L3_KBPS = [
+  0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160,
+];
+const SAMPLE_RATES: Record<number, number[]> = {
+  3: [44100, 48000, 32000], // MPEG-1
+  2: [22050, 24000, 16000], // MPEG-2
+  0: [11025, 12000, 8000], // MPEG-2.5
+};
 const MP3_FALLBACK_KBPS = 128;
 
-/** Estimate an mp3's playback duration from its size + first-frame bitrate.
- *  bits / kbps = milliseconds. */
+/** An mp3's playback duration: walks every frame (so constant and variable
+ *  bitrates, MPEG-1, MPEG-2 and 2.5, and a leading ID3 tag all count right).
+ *  Bytes past the last readable frame count at that frame's bitrate; with no
+ *  readable frame at all, at 128 kbps. */
 export const estimateMp3DurationMs = (bytes: Uint8Array) => {
-  let kbps = MP3_FALLBACK_KBPS;
-  const scanEnd = Math.min(bytes.length - 2, MP3_HEADER_SCAN_BYTES);
-  for (let i = 0; i < scanEnd; i += 1) {
-    // Frame sync: 11 set bits.
-    if (bytes[i] !== 0xff || ((bytes[i + 1] ?? 0) & 0xe0) !== 0xe0) continue;
-    const index = ((bytes[i + 2] ?? 0) >> 4) & 0x0f;
-    const parsed = MP3_BITRATES_KBPS[index];
-    if (parsed && parsed > 0) {
-      kbps = parsed;
-      break;
-    }
+  let i = 0;
+  // Skip an ID3v2 tag: "ID3", version, flags, 4-byte syncsafe size.
+  if (bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33) {
+    const size =
+      ((bytes[6] ?? 0) << 21) |
+      ((bytes[7] ?? 0) << 14) |
+      ((bytes[8] ?? 0) << 7) |
+      (bytes[9] ?? 0);
+    i = 10 + size;
   }
-
-  return (bytes.length * 8) / kbps;
+  let ms = 0;
+  let frames = 0;
+  let lastKbps = MP3_FALLBACK_KBPS;
+  while (i + 4 <= bytes.length) {
+    const b1 = bytes[i + 1] ?? 0,
+      b2 = bytes[i + 2] ?? 0;
+    if (bytes[i] !== 0xff || (b1 & 0xe0) !== 0xe0) {
+      // Not at a frame: resync, but only before the first frame is found.
+      if (frames) break;
+      i += 1;
+      continue;
+    }
+    const version = (b1 >> 3) & 0x03; // 3 = MPEG-1, 2 = MPEG-2, 0 = MPEG-2.5
+    const layer = (b1 >> 1) & 0x03; // 1 = Layer III
+    const rates = SAMPLE_RATES[version];
+    const kbps = (version === 3 ? MPEG1_L3_KBPS : MPEG2_L3_KBPS)[
+      (b2 >> 4) & 0x0f
+    ];
+    const sampleRate = rates?.[(b2 >> 2) & 0x03];
+    if (layer !== 1 || !kbps || !sampleRate) {
+      if (frames) break;
+      i += 1;
+      continue;
+    }
+    const samples = version === 3 ? 1152 : 576;
+    const padding = (b2 >> 1) & 0x01;
+    const length =
+      Math.floor(((samples / 8) * kbps * 1000) / sampleRate) + padding;
+    if (length <= 4) break;
+    ms += (samples / sampleRate) * 1000;
+    frames += 1;
+    lastKbps = kbps;
+    i += length;
+  }
+  if (!frames) return (bytes.length * 8) / MP3_FALLBACK_KBPS;
+  // Anything after the last readable frame, at that frame's bitrate.
+  return ms + (Math.max(0, bytes.length - i) * 8) / lastKbps;
 };
 
 const decodeBase64 = (b64: string): Uint8Array => {

@@ -274,11 +274,12 @@ describe("createRecallMeetingSource stop", () => {
 describe("speak queue", () => {
   const FRAME_HEADER = [0xff, 0xfb, 0x90, 0x00]; // MPEG-1 L3, 128 kbps
 
-  test("estimateMp3DurationMs reads the first-frame bitrate", () => {
+  test("estimateMp3DurationMs counts past the last readable frame at its bitrate", () => {
     const bytes = new Uint8Array(16_000);
     bytes.set(FRAME_HEADER, 0);
-    // 16000 bytes * 8 bits / 128 kbps = 1000 ms
-    expect(estimateMp3DurationMs(bytes)).toBe(1000);
+    // One frame, then 16000 bytes in all at 128 kbps ≈ 1000 ms (frame
+    // lengths round, so within a few ms).
+    expect(estimateMp3DurationMs(bytes)).toBeCloseTo(1000, -1);
     // No header → 128 kbps fallback.
     expect(estimateMp3DurationMs(new Uint8Array(1600))).toBe(100);
   });
