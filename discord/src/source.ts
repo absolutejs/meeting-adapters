@@ -316,7 +316,7 @@ export const createDiscordMeetingSource = (
         debug: true,
         guildId: options.guildId,
         selfDeaf: false, // must hear to receive
-        selfMute: true, // the referee only listens
+        selfMute: false, // receive audio and allow explicitly requested speech
       });
       // Diagnostic plumbing — voice handshakes are the most common failure
       // mode (close-code 4017 'DAVE required', UDP egress blocks, etc.) and
